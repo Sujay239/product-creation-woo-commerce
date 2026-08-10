@@ -1,0 +1,972 @@
+{
+  "name": "WooCommerce - Create Simple Product",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "create-product-acordell",
+        "responseMode": "responseNode",
+        "options": {
+          "rawBody": true,
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Access-Control-Allow-Origin",
+                "value": "*"
+              }
+            ]
+          }
+        }
+      },
+      "id": "66c27926-b0e4-4779-a7e3-971f109274f5",
+      "name": "Webhook - Create Product",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -3776,
+        400
+      ],
+      "webhookId": "product-create-webhook-id",
+      "notesInFlow": true,
+      "notes": "Receives multipart/form-data with:\n- Text fields: name, description, categories, brand, tags, regular_price, sale_price, sku, stock_mode, quantity, gallery_count\n- Binary files: product_image, gallery_image_0, gallery_image_1, etc."
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================================\n// VALIDATE & PARSE incoming multipart/form-data\n// ============================================================\n// The webhook puts form text fields into $json.body (or $json)\n// and binary files into the binary properties of the item.\n\nconst items = $input.all();\nconst body = items[0]?.json?.body || items[0]?.json || {};\nconst binary = items[0]?.binary || {};\n\n// --- Extract text fields ---\nconst name = (body.name || '').trim();\nconst description = (body.description || '').trim();\nconst regularPrice = (body.regular_price || '').toString().trim();\nconst salePrice = (body.sale_price || '').toString().trim();\nconst sku = (body.sku || '').toString().trim();\nconst stockMode = (body.stock_mode || 'in_stock').trim();\nconst quantity = body.quantity ? parseInt(body.quantity) : null;\nconst galleryCount = parseInt(body.gallery_count) || 0;\n\n// Parse JSON arrays sent as strings\nlet categories = [];\ntry { categories = JSON.parse(body.categories || '[]'); } catch(e) { categories = []; }\n\nlet tags = [];\ntry { tags = JSON.parse(body.tags || '[]'); } catch(e) { tags = []; }\n\nconst brandId = body.brand ? parseInt(body.brand) : null;\n\n// --- Validation ---\nconst errors = [];\n\nif (!name) errors.push('Product name is required.');\nif (!description) errors.push('Description is required.');\nif (!regularPrice || parseFloat(regularPrice) < 0) errors.push('Valid regular price is required.');\n\nif (salePrice && parseFloat(salePrice) > parseFloat(regularPrice)) {\n  errors.push('Sale price cannot exceed regular price.');\n}\n\n// Validate stock logic\nif (stockMode === 'track_quantity') {\n  if (quantity === null || quantity === undefined || isNaN(quantity)) {\n    errors.push('Quantity is required when tracking stock.');\n  } else if (!Number.isInteger(quantity) || quantity <= 0) {\n    errors.push('Quantity must be a positive integer (>= 1).');\n  }\n}\n\n// Check for main product image in binary data\nif (!binary.product_image) {\n  errors.push('Product image is required.');\n}\n\nif (errors.length > 0) {\n  return [{\n    json: {\n      _valid: false,\n      _error: {\n        success: false,\n        message: errors.join(' ')\n      }\n    }\n  }];\n}\n\n// --- Build validated data object ---\n// This carries all parsed data forward through the workflow.\nreturn [{\n  json: {\n    _valid: true,\n    _formData: {\n      name,\n      description,\n      regularPrice,\n      salePrice: salePrice || null,\n      sku: sku || null,\n      stockMode,\n      quantity,\n      categories: Array.isArray(categories) ? categories : [],\n      tags: Array.isArray(tags) ? tags : [],\n      brandId,\n      galleryCount\n    }\n  },\n  binary: binary  // Pass binary data through\n}];\n"
+      },
+      "id": "f6714fb9-2018-4e94-9a6c-7a5b30372211",
+      "name": "Code - Validate Input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -3536,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "condition-valid",
+              "leftValue": "={{ $json._valid }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "e1486024-dc84-41e6-adc1-3eaa04a3c97e",
+      "name": "IF - Valid Input",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -3328,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Pass through validation error to the error response node\nconst items = $input.all();\nreturn [{ json: items[0].json._error }];\n"
+      },
+      "id": "03216688-9a8c-49e7-8456-ad0a3c88ac45",
+      "name": "Code - Validation Error Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -3088,
+        608
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json) }}",
+        "options": {
+          "responseCode": "400",
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Access-Control-Allow-Origin",
+                "value": "*"
+              }
+            ]
+          }
+        }
+      },
+      "id": "be7ec8e0-abf7-480c-9dbb-d4ad84711c6a",
+      "name": "Respond - Validation Error",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        -2848,
+        608
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================================\n// PREPARE IMAGE UPLOAD ITEMS\n// ============================================================\n// Create one output item per image (main image first, then gallery).\n// Each item carries the binary under a 'file' key and metadata.\n// n8n will process all items through the next HTTP Request node.\n\nconst items = $input.all();\nconst binary = items[0].binary || {};\nconst formData = items[0].json._formData;\nconst galleryCount = formData.galleryCount || 0;\n\nconst outputItems = [];\n\n// 1. Main product image (always first)\nif (binary.product_image) {\n  outputItems.push({\n    json: {\n      _imageType: 'main',\n      _imageIndex: 0,\n      _formData: formData\n    },\n    binary: {\n      file: binary.product_image\n    }\n  });\n}\n\n// 2. Gallery images (indexed as gallery_image_0, gallery_image_1, etc.)\nfor (let i = 0; i < galleryCount; i++) {\n  const key = `gallery_image_${i}`;\n  if (binary[key]) {\n    outputItems.push({\n      json: {\n        _imageType: 'gallery',\n        _imageIndex: i + 1,\n        _formData: formData\n      },\n      binary: {\n        file: binary[key]\n      }\n    });\n  }\n}\n\nreturn outputItems;\n"
+      },
+      "id": "b0035f5f-2df5-43e4-b37a-cbbd6fe29daa",
+      "name": "Code - Prepare Image Items",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -3088,
+        304
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://acordell.com/wp-json/wp/v2/media",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Disposition",
+              "value": "=attachment; filename=\"{{ $binary.file.fileName }}\""
+            },
+            {
+              "name": "Content-Type",
+              "value": "={{ $binary.file.mimeType }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "binaryData",
+        "inputDataFieldName": "file",
+        "options": {}
+      },
+      "id": "28f3cf9c-166f-4d56-9f09-b7afdb30dae8",
+      "name": "HTTP Request - Upload Image to WP Media",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -2848,
+        304
+      ],
+      "notesInFlow": true,
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "pFuwiC8TcTVK4M4S",
+          "name": "Acordell Shop manager"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "notes": "Uploads each image to WordPress Media Library.\nProcesses ALL items (main image + gallery images).\nEach item's binary 'file' is sent to /wp/v2/media.\nReturns the WordPress media object with 'id' for each."
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================================\n// COLLECT ALL UPLOADED IMAGE IDs\n// ============================================================\nconst uploadItems = $input.all();\nconst formData = $('Code - Validate Input').first().json._formData || {};\n\nlet mainImageId = null;\nconst galleryImageIds = [];\n\nfor (let i = 0; i < uploadItems.length; i++) {\n  const data = uploadItems[i].json;\n  const mediaId = data.id;\n  \n  if (!mediaId) {\n    continue;\n  }\n  \n  if (i === 0) {\n    mainImageId = mediaId;\n  } else {\n    galleryImageIds.push(mediaId);\n  }\n}\n\nif (!mainImageId) {\n  return [{\n    json: {\n      _error: true,\n      success: false,\n      message: 'Failed to upload the main product image to WordPress Media: ' + (uploadItems[0]?.json?.message || 'Media upload error')\n    }\n  }];\n}\n\n// Build the images array for WooCommerce (main image first)\nconst wcImages = [{ id: mainImageId }];\ngalleryImageIds.forEach(gid => wcImages.push({ id: gid }));\n\n// Prepare tag items if tags exist\nconst tags = formData.tags || [];\n\nif (tags.length > 0) {\n  return tags.map((tagName, idx) => ({\n    json: {\n      _tagName: tagName,\n      _tagIndex: idx,\n      _wcImages: wcImages,\n      _hasTags: true\n    }\n  }));\n} else {\n  return [{\n    json: {\n      _wcImages: wcImages,\n      _hasTags: false,\n      _tagIds: []\n    }\n  }];\n}\n"
+      },
+      "id": "872c44ad-300f-4e9e-a0ce-cef23d35eb6c",
+      "name": "Code - Collect Image IDs & Prepare Tags",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2608,
+        304
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "check-error",
+              "leftValue": "={{ $json._error }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "notEquals",
+                "name": "filter.operator.notEquals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "4bfdcb96-d4c5-483c-a972-b7ce47e5ab1f",
+      "name": "IF - Image Upload OK",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -2368,
+        304
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "condition-has-tags",
+              "leftValue": "={{ $json._hasTags }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "f892f5ae-be7f-4068-9fc2-6a49d8745ea3",
+      "name": "IF - Has Tags",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -2128,
+        208
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://acordell.com/wp-json/wc/v3/products/tags",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "name",
+              "value": "={{ $json._tagName }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "77ffc9c1-9021-4c6b-84f4-e4080f634984",
+      "name": "HTTP Request - Create or Find Tag",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -1888,
+        112
+      ],
+      "notesInFlow": true,
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "pFuwiC8TcTVK4M4S",
+          "name": "Acordell Shop manager"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "notes": "Attempts to create each tag. If the tag already exists,\nWooCommerce returns a 'term_exists' error with resource_id.\nWe handle both cases in the next Code node to extract the tag ID."
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================================\n// AGGREGATE TAG IDs\n// ============================================================\nconst items = $input.all();\nconst tagIds = [];\n\nfor (const item of items) {\n  const data = item.json;\n  if (data.id) {\n    tagIds.push(data.id);\n  } else if (data.code === 'term_exists' && data.data?.resource_id) {\n    tagIds.push(data.data.resource_id);\n  }\n}\n\nconst wcImages = $('Code - Collect Image IDs & Prepare Tags').first().json._wcImages || [];\n\nreturn [{\n  json: {\n    _wcImages: wcImages,\n    _tagIds: tagIds\n  }\n}];\n"
+      },
+      "id": "be87086f-d00b-4da1-bd04-68433b5e3593",
+      "name": "Code - Aggregate Tag IDs",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1648,
+        112
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const wcImages = $('Code - Collect Image IDs & Prepare Tags').first().json._wcImages || [];\nreturn [{\n  json: {\n    _wcImages: wcImages,\n    _tagIds: []\n  }\n}];\n"
+      },
+      "id": "6786cbc5-03fe-4179-a757-c6fd2943dc64",
+      "name": "Code - No Tags",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1888,
+        320
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "fc89baf9-c29f-492d-8f01-f27c404c3d7d",
+      "name": "Merge - Tags",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3,
+      "position": [
+        -1408,
+        208
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================================\n// BUILD WOOCOMMERCE PRODUCT PAYLOAD\n// ============================================================\nconst formData = $('Code - Validate Input').first().json._formData || {};\nconst tagData = $input.first()?.json || {};\nconst wcImages = tagData._wcImages || $('Code - Collect Image IDs & Prepare Tags').first().json._wcImages || [];\nconst tagIds = tagData._tagIds || [];\n\n// --- Base product payload ---\nconst product = {\n  name: formData.name || 'Product',\n  type: 'simple',\n  description: formData.description || '',\n  regular_price: (formData.regularPrice !== undefined && formData.regularPrice !== null) ? formData.regularPrice.toString() : '',\n  images: wcImages\n};\n\n// --- Optional: Sale price ---\nif (formData.salePrice && formData.salePrice !== '' && formData.salePrice !== null) {\n  product.sale_price = formData.salePrice.toString();\n}\n\n// --- Optional: SKU ---\nif (formData.sku && formData.sku !== '') {\n  product.sku = formData.sku.toString();\n}\n\n// --- Categories ---\nif (formData.categories && formData.categories.length > 0) {\n  product.categories = formData.categories.map(id => ({ id: parseInt(id) }));\n}\n\n// --- Tags ---\nif (tagIds.length > 0) {\n  product.tags = tagIds.map(id => ({ id: parseInt(id) }));\n}\n\n// --- Stock logic ---\nswitch (formData.stockMode) {\n  case 'in_stock':\n    product.manage_stock = false;\n    product.stock_status = 'instock';\n    break;\n  case 'out_of_stock':\n    product.manage_stock = false;\n    product.stock_status = 'outofstock';\n    break;\n  case 'track_quantity':\n    product.manage_stock = true;\n    if (formData.quantity !== null && formData.quantity !== undefined) {\n      product.stock_quantity = parseInt(formData.quantity);\n    }\n    break;\n  default:\n    product.manage_stock = false;\n    product.stock_status = 'instock';\n}\n\nreturn [{\n  json: {\n    _productPayload: product,\n    _brandId: formData.brandId || null\n  }\n}];\n"
+      },
+      "id": "2f6ab48d-bcc0-455c-98a8-b3ddfaa65cd1",
+      "name": "Code - Build Product Payload",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1168,
+        208
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://acordell.com/wp-json/wc/v3/products",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json._productPayload) }}",
+        "options": {}
+      },
+      "id": "2c6c0c8d-92a4-406d-bd6a-7b0a3100543d",
+      "name": "HTTP Request - Create WooCommerce Product",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -928,
+        208
+      ],
+      "notesInFlow": true,
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "pFuwiC8TcTVK4M4S",
+          "name": "Acordell Shop manager"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "notes": "Creates the WooCommerce simple product.\nThe payload includes: name, type=simple, description,\nprices, images (with media IDs), categories, tags, and stock config."
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================================\n// PROCESS PRODUCT CREATION RESULT & PREPARE BRAND ASSIGNMENT\n// ============================================================\nconst items = $input.all();\nconst data = items[0]?.json || {};\nconst formData = $('Code - Validate Input').first().json._formData || {};\n\n// Check if product was created successfully\nif (!data.id) {\n  return [{\n    json: {\n      _error: true,\n      success: false,\n      message: 'Failed to create product: ' + (data.message || JSON.stringify(data))\n    }\n  }];\n}\n\nreturn [{\n  json: {\n    _productId: data.id,\n    _productName: data.name || formData.name || 'Product',\n    _brandId: formData.brandId || null,\n    _productCreated: true\n  }\n}];\n"
+      },
+      "id": "d500ca15-4de7-421c-8c85-50d938db210d",
+      "name": "Code - Check Product Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -688,
+        208
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "condition-product-ok",
+              "leftValue": "={{ $json._productCreated }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "8af69189-8a10-44a4-bb99-ec6fafe22b11",
+      "name": "IF - Product Created OK",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -464,
+        208
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "condition-has-brand",
+              "leftValue": "={{ $json._brandId }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "isNotEmpty",
+                "name": "filter.operator.isNotEmpty"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "1830b91e-b880-4a70-a528-79b958683400",
+      "name": "IF - Has Brand",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -240,
+        112
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://acordell.com/wp-json/wp/v2/product/{{ $json._productId }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ 'product_brand': [$json._brandId] }) }}",
+        "options": {}
+      },
+      "id": "8af98409-8eba-4395-aa1f-d816859e0758",
+      "name": "HTTP Request - Assign Brand",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        0,
+        0
+      ],
+      "notesInFlow": true,
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "upKkAgwBWe3ytLbu",
+          "name": "Sugar story shop manager"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "notes": "IMPORTANT: Replace 'BRAND_TAXONOMY' in the JSON body key with your actual brand taxonomy slug (e.g., 'product_brand').\n\nThis assigns the brand term to the product using the WordPress REST API.\nThe product custom post type must have the brand taxonomy registered with show_in_rest=true.\n\nThe URL uses /wp/v2/product/{id} — this is the WordPress REST API endpoint for the 'product' post type."
+    },
+    {
+      "parameters": {
+        "jsCode": "const createdProduct = $('HTTP Request - Create WooCommerce Product').first()?.json || {};\n\nreturn [{\n  json: {\n    success: true,\n    message: 'Product created successfully!',\n    product: {\n      id: createdProduct.id || null,\n      name: createdProduct.name || 'Product',\n      brand_assigned: true\n    }\n  }\n}];\n"
+      },
+      "id": "00b919c1-4854-4467-9411-12928dd658af",
+      "name": "Code - Success With Brand",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const createdProduct = $('HTTP Request - Create WooCommerce Product').first()?.json || {};\n\nreturn [{\n  json: {\n    success: true,\n    message: 'Product created successfully!',\n    product: {\n      id: createdProduct.id || null,\n      name: createdProduct.name || 'Product',\n      brand_assigned: false\n    }\n  }\n}];\n"
+      },
+      "id": "8c02abb9-b8ff-4df0-b469-beb31ac262b3",
+      "name": "Code - Success No Brand",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        0,
+        224
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "3598c378-a4af-4ceb-b02d-b9fbe3f8a42a",
+      "name": "Merge - Brand",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3,
+      "position": [
+        480,
+        112
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json) }}",
+        "options": {
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Access-Control-Allow-Origin",
+                "value": "*"
+              },
+              {
+                "name": "Access-Control-Allow-Methods",
+                "value": "POST, OPTIONS"
+              },
+              {
+                "name": "Access-Control-Allow-Headers",
+                "value": "Content-Type"
+              }
+            ]
+          }
+        }
+      },
+      "id": "46edaa29-41aa-48ac-80ca-9d2324ad4ea2",
+      "name": "Respond to Webhook - Success",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        720,
+        112
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json) }}",
+        "options": {
+          "responseCode": "400",
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Access-Control-Allow-Origin",
+                "value": "*"
+              }
+            ]
+          }
+        }
+      },
+      "id": "66335a09-2200-48dc-b3a4-ab38b5455aa3",
+      "name": "Respond to Webhook - Product Error",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        0,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json) }}",
+        "options": {
+          "responseCode": "400",
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Access-Control-Allow-Origin",
+                "value": "*"
+              }
+            ]
+          }
+        }
+      },
+      "id": "7dc730b9-8034-4c3a-98e5-603451a88358",
+      "name": "Respond to Webhook - Image Error",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        -2128,
+        464
+      ]
+    }
+  ],
+  "pinData": {
+    "Webhook - Create Product": [
+      {
+        "json": {
+          "headers": {
+            "host": "n8n.srv917960.hstgr.cloud",
+            "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36 Edg/151.0.0.0",
+            "content-length": "4477095",
+            "accept": "*/*",
+            "accept-encoding": "gzip, deflate, br, zstd",
+            "accept-language": "en-US,en;q=0.9,en-IN;q=0.8",
+            "content-type": "multipart/form-data; boundary=----WebKitFormBoundaryK9zobeQatma5yVFS",
+            "origin": "http://127.0.0.1:5500",
+            "priority": "u=1, i",
+            "referer": "http://127.0.0.1:5500/",
+            "sec-ch-ua": "\"Not=A?Brand\";v=\"99\", \"Microsoft Edge\";v=\"151\", \"Chromium\";v=\"151\"",
+            "sec-ch-ua-mobile": "?0",
+            "sec-ch-ua-platform": "\"Windows\"",
+            "sec-fetch-dest": "empty",
+            "sec-fetch-mode": "cors",
+            "sec-fetch-site": "cross-site",
+            "x-forwarded-for": "172.19.0.1",
+            "x-forwarded-host": "n8n.srv917960.hstgr.cloud",
+            "x-forwarded-port": "443",
+            "x-forwarded-proto": "https",
+            "x-forwarded-server": "79229352e0fb",
+            "x-real-ip": "172.19.0.1"
+          },
+          "params": {},
+          "query": {},
+          "body": {
+            "name": "test",
+            "description": "testing creation from out source",
+            "categories": "[336]",
+            "brand": "338",
+            "tags": "[]",
+            "regular_price": "1500",
+            "sale_price": "798.86",
+            "stock_mode": "in_stock",
+            "gallery_count": "2"
+          },
+          "webhookUrl": "https://n8n.srv917960.hstgr.cloud/webhook/create-product-acordell",
+          "executionMode": "production"
+        },
+        "binary": {
+          "product_image": {
+            "mimeType": "image/png",
+            "fileType": "image",
+            "fileExtension": "png",
+            "data": "filesystem-v2",
+            "fileName": "Screenshot 2026-07-10 225655.png",
+            "id": "filesystem-v2:workflows/DVJAenBHxMOTJxpZ/executions/115028/binary_data/e615acd7-557c-467f-83e4-f5cf25bfc5a7",
+            "fileSize": "371 kB",
+            "bytes": 371455
+          },
+          "gallery_image_0": {
+            "mimeType": "image/png",
+            "fileType": "image",
+            "fileExtension": "png",
+            "data": "filesystem-v2",
+            "fileName": "Screenshot 2024-12-26 121109.png",
+            "id": "filesystem-v2:workflows/DVJAenBHxMOTJxpZ/executions/115028/binary_data/27c92c0e-5f0b-4e78-aee7-3f65a314a7dc",
+            "fileSize": "2.63 MB",
+            "bytes": 2634048
+          },
+          "gallery_image_1": {
+            "mimeType": "image/png",
+            "fileType": "image",
+            "fileExtension": "png",
+            "data": "filesystem-v2",
+            "fileName": "Screenshot 2026-05-23 002234.png",
+            "id": "filesystem-v2:workflows/DVJAenBHxMOTJxpZ/executions/115028/binary_data/b3125490-307f-424f-8bc0-8d163efaef2d",
+            "fileSize": "1.47 MB",
+            "bytes": 1470106
+          }
+        },
+        "pairedItem": {
+          "item": 0
+        }
+      }
+    ]
+  },
+  "connections": {
+    "Webhook - Create Product": {
+      "main": [
+        [
+          {
+            "node": "Code - Validate Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code - Validate Input": {
+      "main": [
+        [
+          {
+            "node": "IF - Valid Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF - Valid Input": {
+      "main": [
+        [
+          {
+            "node": "Code - Prepare Image Items",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Code - Validation Error Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code - Validation Error Response": {
+      "main": [
+        [
+          {
+            "node": "Respond - Validation Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code - Prepare Image Items": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request - Upload Image to WP Media",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request - Upload Image to WP Media": {
+      "main": [
+        [
+          {
+            "node": "Code - Collect Image IDs & Prepare Tags",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code - Collect Image IDs & Prepare Tags": {
+      "main": [
+        [
+          {
+            "node": "IF - Image Upload OK",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF - Image Upload OK": {
+      "main": [
+        [
+          {
+            "node": "IF - Has Tags",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond to Webhook - Image Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF - Has Tags": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request - Create or Find Tag",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Code - No Tags",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request - Create or Find Tag": {
+      "main": [
+        [
+          {
+            "node": "Code - Aggregate Tag IDs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code - Aggregate Tag IDs": {
+      "main": [
+        [
+          {
+            "node": "Merge - Tags",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code - No Tags": {
+      "main": [
+        [
+          {
+            "node": "Merge - Tags",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Merge - Tags": {
+      "main": [
+        [
+          {
+            "node": "Code - Build Product Payload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code - Build Product Payload": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request - Create WooCommerce Product",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request - Create WooCommerce Product": {
+      "main": [
+        [
+          {
+            "node": "Code - Check Product Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code - Check Product Result": {
+      "main": [
+        [
+          {
+            "node": "IF - Product Created OK",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF - Product Created OK": {
+      "main": [
+        [
+          {
+            "node": "IF - Has Brand",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond to Webhook - Product Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF - Has Brand": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request - Assign Brand",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Code - Success No Brand",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request - Assign Brand": {
+      "main": [
+        [
+          {
+            "node": "Code - Success With Brand",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code - Success With Brand": {
+      "main": [
+        [
+          {
+            "node": "Merge - Brand",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code - Success No Brand": {
+      "main": [
+        [
+          {
+            "node": "Merge - Brand",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Merge - Brand": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook - Success",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "versionId": "657df3bb-c82f-4bcc-be73-25be7b3d9aa4",
+  "meta": {
+    "instanceId": "031309915a0a453d6414710542858fed4833fec1142fbf035e6ed4b2fb5d0711"
+  },
+  "nodeGroups": [],
+  "id": "DVJAenBHxMOTJxpZ",
+  "tags": []
+}

@@ -1,0 +1,152 @@
+{
+  "name": "WooCommerce - Get Brands",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "BRAND_LIST_WEBHOOK_PATH",
+        "responseMode": "responseNode",
+        "options": {
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Access-Control-Allow-Origin",
+                "value": "*"
+              }
+            ]
+          }
+        }
+      },
+      "id": "a3000001-0001-4000-8000-000000000001",
+      "name": "Webhook - Get Brands",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [240, 300],
+      "webhookId": "brand-list-webhook-id"
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ 'WORDPRESS_BASE_URL' }}/wp-json/wp/v2/BRAND_TAXONOMY",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "per_page",
+              "value": "100"
+            },
+            {
+              "name": "orderby",
+              "value": "name"
+            },
+            {
+              "name": "order",
+              "value": "asc"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "a3000001-0001-4000-8000-000000000002",
+      "name": "HTTP Request - WordPress Brands",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [480, 300],
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "REPLACE_WITH_CREDENTIAL_ID",
+          "name": "WordPress API Auth"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "notesInFlow": true,
+      "notes": "IMPORTANT: Replace 'BRAND_TAXONOMY' in the URL with your actual brand taxonomy slug.\nDefault is 'product_brand'.\nThe full URL should be: YOUR_SITE/wp-json/wp/v2/product_brand\n\nThis uses the WordPress REST API (not WooCommerce) because\nbrand taxonomies are WordPress custom taxonomies."
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Format the WordPress taxonomy terms (brands) into a clean structure.\n// WordPress REST API returns taxonomy terms with: id, name, slug, etc.\n\nconst inputItems = $input.all();\n\ntry {\n  let brands = [];\n  \n  // n8n may split array responses into separate items\n  const firstJson = inputItems[0]?.json;\n  \n  if (Array.isArray(firstJson)) {\n    brands = firstJson;\n  } else if (inputItems.length >= 1 && firstJson && firstJson.id) {\n    // Items were split — each item is a brand term\n    brands = inputItems.map(item => item.json);\n  } else if (firstJson && firstJson.code) {\n    // Error response (e.g., taxonomy not found)\n    return [{\n      json: {\n        success: false,\n        message: 'Could not fetch brands. Check that the brand taxonomy exists and is exposed to the REST API. Error: ' + (firstJson.message || firstJson.code),\n        brands: []\n      }\n    }];\n  }\n  \n  const cleanBrands = brands\n    .filter(b => b && b.id)\n    .map(b => ({\n      id: b.id,\n      name: b.name || ''\n    }));\n  \n  return [{\n    json: {\n      success: true,\n      brands: cleanBrands\n    }\n  }];\n} catch (error) {\n  return [{\n    json: {\n      success: false,\n      message: 'Failed to fetch brands: ' + error.message,\n      brands: []\n    }\n  }];\n}\n"
+      },
+      "id": "a3000001-0001-4000-8000-000000000003",
+      "name": "Code - Format Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [720, 300]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json) }}",
+        "options": {
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Access-Control-Allow-Origin",
+                "value": "*"
+              },
+              {
+                "name": "Access-Control-Allow-Methods",
+                "value": "GET, OPTIONS"
+              },
+              {
+                "name": "Access-Control-Allow-Headers",
+                "value": "Content-Type"
+              }
+            ]
+          }
+        }
+      },
+      "id": "a3000001-0001-4000-8000-000000000004",
+      "name": "Respond to Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [960, 300]
+    }
+  ],
+  "connections": {
+    "Webhook - Get Brands": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request - WordPress Brands",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request - WordPress Brands": {
+      "main": [
+        [
+          {
+            "node": "Code - Format Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code - Format Response": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [],
+  "triggerCount": 1,
+  "updatedAt": "2024-01-01T00:00:00.000Z",
+  "versionId": "wf-get-brands-v1"
+}

@@ -1,0 +1,150 @@
+{
+  "name": "WooCommerce - Get Categories",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "CATEGORY_LIST_WEBHOOK_PATH",
+        "responseMode": "responseNode",
+        "options": {
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Access-Control-Allow-Origin",
+                "value": "*"
+              }
+            ]
+          }
+        }
+      },
+      "id": "a1000001-0001-4000-8000-000000000001",
+      "name": "Webhook - Get Categories",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [240, 300],
+      "webhookId": "cat-list-webhook-id"
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ 'WORDPRESS_BASE_URL' }}/wp-json/wc/v3/products/categories",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "per_page",
+              "value": "100"
+            },
+            {
+              "name": "orderby",
+              "value": "name"
+            },
+            {
+              "name": "order",
+              "value": "asc"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "a1000001-0001-4000-8000-000000000002",
+      "name": "HTTP Request - WooCommerce Categories",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [480, 300],
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "REPLACE_WITH_CREDENTIAL_ID",
+          "name": "WooCommerce API Auth"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Format the WooCommerce categories response into a clean structure\n// that the frontend can directly consume.\n\nconst inputItems = $input.all();\n\ntry {\n  // The HTTP Request node returns the raw WooCommerce response.\n  // If it's an array, it contains the categories.\n  // If it's an error, we handle it gracefully.\n  \n  let rawData = inputItems[0]?.json;\n  \n  // Check if the response is an array (successful response)\n  // When HTTP Request returns the response directly, the first item's json\n  // contains the response body. For arrays, n8n may split into items.\n  let categories = [];\n  \n  if (Array.isArray(rawData)) {\n    categories = rawData;\n  } else if (inputItems.length > 1 || (rawData && rawData.id)) {\n    // n8n splits array responses into separate items\n    categories = inputItems.map(item => item.json);\n  }\n  \n  // Map to clean format: { id, name, parent }\n  const cleanCategories = categories\n    .filter(cat => cat && cat.id)\n    .map(cat => ({\n      id: cat.id,\n      name: cat.name || '',\n      parent: cat.parent || 0\n    }));\n  \n  return [{\n    json: {\n      success: true,\n      categories: cleanCategories\n    }\n  }];\n} catch (error) {\n  return [{\n    json: {\n      success: false,\n      message: 'Failed to fetch categories: ' + error.message,\n      categories: []\n    }\n  }];\n}\n"
+      },
+      "id": "a1000001-0001-4000-8000-000000000003",
+      "name": "Code - Format Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [720, 300]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json) }}",
+        "options": {
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Access-Control-Allow-Origin",
+                "value": "*"
+              },
+              {
+                "name": "Access-Control-Allow-Methods",
+                "value": "GET, OPTIONS"
+              },
+              {
+                "name": "Access-Control-Allow-Headers",
+                "value": "Content-Type"
+              }
+            ]
+          }
+        }
+      },
+      "id": "a1000001-0001-4000-8000-000000000004",
+      "name": "Respond to Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [960, 300]
+    }
+  ],
+  "connections": {
+    "Webhook - Get Categories": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request - WooCommerce Categories",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request - WooCommerce Categories": {
+      "main": [
+        [
+          {
+            "node": "Code - Format Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code - Format Response": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [],
+  "triggerCount": 1,
+  "updatedAt": "2024-01-01T00:00:00.000Z",
+  "versionId": "wf-get-categories-v1"
+}
