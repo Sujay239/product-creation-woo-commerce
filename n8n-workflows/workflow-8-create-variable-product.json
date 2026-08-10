@@ -1,0 +1,957 @@
+{
+  "name": "WooCommerce - Create Variable Product",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "create-variable-product-acordell",
+        "responseMode": "responseNode",
+        "options": {
+          "rawBody": true,
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Access-Control-Allow-Origin",
+                "value": "*"
+              }
+            ]
+          }
+        }
+      },
+      "id": "b8000001-0001-4000-8000-000000000001",
+      "name": "Webhook - Create Variable Product",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -4672,
+        1264
+      ],
+      "webhookId": "variable-product-create-webhook-id",
+      "notesInFlow": true,
+      "notes": "Receives multipart/form-data with:\n- Text fields: name, description, categories, brand, tags, regular_price, sale_price, sku, stock_mode, quantity, gallery_count, attributes, variations\n- Binary files: product_image, gallery_image_0, gallery_image_1, etc.\n\nAttributes format: JSON array of { id, name, options: [], variation: true, visible: true }\nVariations format: JSON array of variation objects with attribute selections, prices, stock config"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================================\n// VALIDATE & PARSE incoming multipart/form-data\n// ============================================================\nconst items = $input.all();\nconst body = items[0]?.json?.body || items[0]?.json || {};\nconst binary = items[0]?.binary || {};\n\n// --- Extract text fields ---\nconst name = (body.name || '').trim();\nconst description = (body.description || '').trim();\nconst regularPrice = (body.regular_price || '').toString().trim();\nconst salePrice = (body.sale_price || '').toString().trim();\nconst sku = (body.sku || '').toString().trim();\nconst stockMode = (body.stock_mode || 'in_stock').trim();\nconst quantity = body.quantity ? parseInt(body.quantity) : null;\nconst galleryCount = parseInt(body.gallery_count) || 0;\n\n// Parse categories\nlet categories = [];\nif (Array.isArray(body.categories)) {\n  categories = body.categories;\n} else if (typeof body.categories === 'string' && body.categories.trim() !== '') {\n  try { categories = JSON.parse(body.categories); } catch(e) {\n    categories = body.categories.split(',').map(c => c.trim()).filter(Boolean);\n  }\n}\nif (!Array.isArray(categories)) categories = [categories];\n\n// Parse tags\nlet tags = [];\nif (Array.isArray(body.tags)) {\n  tags = body.tags;\n} else if (typeof body.tags === 'string' && body.tags.trim() !== '') {\n  try { tags = JSON.parse(body.tags); } catch(e) {\n    tags = body.tags.split(',').map(t => t.trim()).filter(Boolean);\n  }\n}\nif (!Array.isArray(tags)) tags = [tags];\ntags = tags.map(t => typeof t === 'string' ? t.trim() : (t?.name || t)).filter(Boolean);\n\n// Parse brand(s) — supports array ([12, 34]), JSON string ('[12, 34]'), comma string ('12, 34'), or single ID\nlet brandIds = [];\nconst rawBrand = body.brands || body.brand;\n\nif (Array.isArray(rawBrand)) {\n  brandIds = rawBrand.map(b => parseInt(b)).filter(id => !isNaN(id) && id > 0);\n} else if (typeof rawBrand === 'string' && rawBrand.trim() !== '') {\n  try {\n    const parsed = JSON.parse(rawBrand);\n    if (Array.isArray(parsed)) {\n      brandIds = parsed.map(b => parseInt(b)).filter(id => !isNaN(id) && id > 0);\n    } else if (!isNaN(parseInt(parsed)) && parseInt(parsed) > 0) {\n      brandIds = [parseInt(parsed)];\n    }\n  } catch(e) {\n    brandIds = rawBrand.split(',').map(b => parseInt(b.trim())).filter(id => !isNaN(id) && id > 0);\n  }\n} else if (typeof rawBrand === 'number' && rawBrand > 0) {\n  brandIds = [rawBrand];\n}\n\nconst brandId = brandIds.length > 0 ? brandIds[0] : null;\n\n// --- Extract variable product specific fields ---\nlet attributes = [];\nif (Array.isArray(body.attributes)) {\n  attributes = body.attributes;\n} else if (typeof body.attributes === 'string' && body.attributes.trim() !== '') {\n  try { attributes = JSON.parse(body.attributes); } catch(e) { attributes = []; }\n}\n\nlet variations = [];\nif (Array.isArray(body.variations)) {\n  variations = body.variations;\n} else if (typeof body.variations === 'string' && body.variations.trim() !== '') {\n  try { variations = JSON.parse(body.variations); } catch(e) { variations = []; }\n}\n\n// --- Validation ---\nconst errors = [];\n\nif (!name) errors.push('Product name is required.');\nif (!description) errors.push('Description is required.');\n\nif (stockMode === 'track_quantity') {\n  if (quantity === null || quantity === undefined || isNaN(quantity)) {\n    errors.push('Quantity is required when tracking stock.');\n  } else if (!Number.isInteger(quantity) || quantity <= 0) {\n    errors.push('Quantity must be a positive integer (>= 1).');\n  }\n}\n\nif (!binary.product_image) {\n  errors.push('Product image is required.');\n}\n\nif (!Array.isArray(attributes) || attributes.length === 0) {\n  errors.push('At least one attribute is required for a variable product.');\n}\n\nif (!Array.isArray(variations) || variations.length === 0) {\n  errors.push('At least one variation is required for a variable product.');\n}\n\nif (variations.length > 0) {\n  for (let i = 0; i < variations.length; i++) {\n    const v = variations[i];\n    if (!v.regular_price && v.regular_price !== '0' && v.regular_price !== 0) {\n      errors.push(`Variation ${i + 1}: regular_price is required.`);\n    }\n    if (!v.attributes || !Array.isArray(v.attributes) || v.attributes.length === 0) {\n      errors.push(`Variation ${i + 1}: at least one attribute selection is required.`);\n    }\n  }\n}\n\nif (errors.length > 0) {\n  return [{\n    json: {\n      _valid: false,\n      _error: {\n        success: false,\n        message: errors.join(' ')\n      }\n    }\n  }];\n}\n\nreturn [{\n  json: {\n    _valid: true,\n    _formData: {\n      name,\n      description,\n      regularPrice: regularPrice || null,\n      salePrice: salePrice || null,\n      sku: sku || null,\n      stockMode,\n      quantity,\n      categories,\n      tags,\n      brandId,\n      brandIds,\n      galleryCount,\n      attributes,\n      variations\n    }\n  },\n  binary: binary\n}];\n"
+      },
+      "id": "b8000001-0001-4000-8000-000000000002",
+      "name": "Code - Validate Input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -4432,
+        1264
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "condition-valid",
+              "leftValue": "={{ $json._valid }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "b8000001-0001-4000-8000-000000000003",
+      "name": "IF - Valid Input",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -4224,
+        1264
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Pass through validation error to the error response node\nconst items = $input.all();\nreturn [{ json: items[0].json._error }];\n"
+      },
+      "id": "b8000001-0001-4000-8000-000000000004",
+      "name": "Code - Validation Error Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -3984,
+        1472
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json) }}",
+        "options": {
+          "responseCode": "400",
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Access-Control-Allow-Origin",
+                "value": "*"
+              }
+            ]
+          }
+        }
+      },
+      "id": "b8000001-0001-4000-8000-000000000005",
+      "name": "Respond - Validation Error",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        -3744,
+        1472
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================================\n// PREPARE IMAGE UPLOAD ITEMS\n// ============================================================\n// Create output items for: 1. Main image, 2. Gallery images, 3. Variation images.\n// Each item carries the binary under a 'file' key and metadata.\n// n8n will process all items through the HTTP Request node.\n\nconst items = $input.all();\nconst binary = items[0].binary || {};\nconst formData = items[0].json._formData || {};\nconst galleryCount = formData.galleryCount || 0;\nconst variations = formData.variations || [];\n\nconst outputItems = [];\n\n// 1. Main product image (always first)\nif (binary.product_image) {\n  outputItems.push({\n    json: {\n      _imageType: 'main',\n      _imageIndex: 0,\n      _formData: formData\n    },\n    binary: {\n      file: binary.product_image\n    }\n  });\n}\n\n// 2. Gallery images (indexed as gallery_image_0, gallery_image_1, etc.)\nfor (let i = 0; i < galleryCount; i++) {\n  const key = `gallery_image_${i}`;\n  if (binary[key]) {\n    outputItems.push({\n      json: {\n        _imageType: 'gallery',\n        _galleryIndex: i,\n        _formData: formData\n      },\n      binary: {\n        file: binary[key]\n      }\n    });\n  }\n}\n\n// 3. Child Variation images (indexed as variation_image_0, variation_image_1, etc.)\nfor (let i = 0; i < variations.length; i++) {\n  const key = `variation_image_${i}`;\n  if (binary[key]) {\n    outputItems.push({\n      json: {\n        _imageType: 'variation',\n        _variationIndex: i,\n        _formData: formData\n      },\n      binary: {\n        file: binary[key]\n      }\n    });\n  }\n}\n\nreturn outputItems;\n"
+      },
+      "id": "b8000001-0001-4000-8000-000000000006",
+      "name": "Code - Prepare Image Items",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -3984,
+        1168
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://acordell.com/wp-json/wp/v2/media",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Disposition",
+              "value": "=attachment; filename=\"{{ $binary.file.fileName }}\""
+            },
+            {
+              "name": "Content-Type",
+              "value": "={{ $binary.file.mimeType }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "binaryData",
+        "inputDataFieldName": "file",
+        "options": {}
+      },
+      "id": "b8000001-0001-4000-8000-000000000007",
+      "name": "HTTP Request - Upload Image to WP Media",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -3744,
+        1168
+      ],
+      "notesInFlow": true,
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "pFuwiC8TcTVK4M4S",
+          "name": "Acordell Shop manager"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "notes": "Uploads each image to WordPress Media Library.\nProcesses ALL items (main image + gallery images + variation images).\nEach item's binary 'file' is sent to /wp/v2/media.\nReturns the WordPress media object with 'id' for each."
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================================\n// COLLECT ALL UPLOADED IMAGE IDs (MAIN, GALLERY, VARIATIONS)\n// ============================================================\nconst uploadItems = $input.all();\nconst formData = $('Code - Validate Input').first().json._formData || {};\nconst prepItems = $('Code - Prepare Image Items').all() || [];\n\nlet mainImageId = null;\nconst galleryImageIds = [];\nconst variationImageMap = {}; // Map of { variationIndex: mediaId }\n\nfor (let i = 0; i < uploadItems.length; i++) {\n  const data = uploadItems[i].json;\n  const meta = prepItems[i]?.json || {};\n  const mediaId = data.id;\n  const imageType = meta._imageType || 'main';\n  \n  if (!mediaId) {\n    continue;\n  }\n  \n  if (imageType === 'main') {\n    mainImageId = mediaId;\n  } else if (imageType === 'gallery') {\n    galleryImageIds.push(mediaId);\n  } else if (imageType === 'variation') {\n    if (meta._variationIndex !== undefined) {\n      variationImageMap[meta._variationIndex] = mediaId;\n    }\n  }\n}\n\nif (!mainImageId) {\n  return [{\n    json: {\n      _error: true,\n      success: false,\n      message: 'Failed to upload the main product image to WordPress Media: ' + (uploadItems[0]?.json?.message || 'Media upload error')\n    }\n  }];\n}\n\n// Build the images array for WooCommerce parent product (main image first)\nconst wcImages = [{ id: mainImageId }];\ngalleryImageIds.forEach(gid => wcImages.push({ id: gid }));\n\n// Prepare tag items if tags exist\nconst tags = formData.tags || [];\n\nif (tags.length > 0) {\n  return tags.map((tagName, idx) => ({\n    json: {\n      _tagName: tagName,\n      _tagIndex: idx,\n      _wcImages: wcImages,\n      _variationImageMap: variationImageMap,\n      _hasTags: true\n    }\n  }));\n} else {\n  return [{\n    json: {\n      _wcImages: wcImages,\n      _variationImageMap: variationImageMap,\n      _hasTags: false,\n      _tagIds: []\n    }\n  }];\n}\n"
+      },
+      "id": "b8000001-0001-4000-8000-000000000008",
+      "name": "Code - Collect Image IDs & Prepare Tags",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -3504,
+        1168
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "check-error",
+              "leftValue": "={{ $json._error }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "notEquals",
+                "name": "filter.operator.notEquals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "b8000001-0001-4000-8000-000000000009",
+      "name": "IF - Image Upload OK",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -3264,
+        1168
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "condition-has-tags",
+              "leftValue": "={{ $json._hasTags }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "b8000001-0001-4000-8000-000000000010",
+      "name": "IF - Has Tags",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -3024,
+        1072
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://acordell.com/wp-json/wc/v3/products/tags",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "name",
+              "value": "={{ $json._tagName }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "b8000001-0001-4000-8000-000000000011",
+      "name": "HTTP Request - Create or Find Tag",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -2784,
+        976
+      ],
+      "notesInFlow": true,
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "pFuwiC8TcTVK4M4S",
+          "name": "Acordell Shop manager"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "notes": "Attempts to create each tag. If the tag already exists,\nWooCommerce returns a 'term_exists' error with resource_id.\nWe handle both cases in the next Code node to extract the tag ID."
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================================\n// AGGREGATE TAG IDs (HANDLES NEW & PRE-EXISTING TAGS)\n// ============================================================\nconst items = $input.all();\nconst tagIds = [];\n\nfor (const item of items) {\n  const data = item.json || {};\n  \n  // Case 1: Tag was freshly created\n  if (data.id) {\n    tagIds.push(parseInt(data.id));\n    continue;\n  }\n  \n  // Case 2: Tag already existed (term_exists in data.data.resource_id)\n  if (data.data?.resource_id) {\n    tagIds.push(parseInt(data.data.resource_id));\n    continue;\n  }\n  \n  // Case 3: Tag already existed but wrapped in n8n/Axios error object\n  const rawStr = JSON.stringify(data);\n  const match = rawStr.match(/resource_id[^0-9]+(\\d+)/i);\n  if (match && match[1]) {\n    tagIds.push(parseInt(match[1]));\n  }\n}\n\nconst collectData = $('Code - Collect Image IDs & Prepare Tags').first().json || {};\nconst wcImages = collectData._wcImages || [];\nconst variationImageMap = collectData._variationImageMap || {};\n\nreturn [{\n  json: {\n    _wcImages: wcImages,\n    _variationImageMap: variationImageMap,\n    _tagIds: tagIds\n  }\n}];\n"
+      },
+      "id": "b8000001-0001-4000-8000-000000000012",
+      "name": "Code - Aggregate Tag IDs",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2544,
+        976
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const collectData = $('Code - Collect Image IDs & Prepare Tags').first().json || {};\nconst wcImages = collectData._wcImages || [];\nconst variationImageMap = collectData._variationImageMap || {};\nreturn [{\n  json: {\n    _wcImages: wcImages,\n    _variationImageMap: variationImageMap,\n    _tagIds: []\n  }\n}];\n"
+      },
+      "id": "b8000001-0001-4000-8000-000000000013",
+      "name": "Code - No Tags",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2784,
+        1184
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "b8000001-0001-4000-8000-000000000014",
+      "name": "Merge - Tags",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3,
+      "position": [
+        -2304,
+        1072
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================================\n// BUILD WOOCOMMERCE VARIABLE PRODUCT PAYLOAD\n// ============================================================\nconst formData = $('Code - Validate Input').first().json._formData || {};\nconst tagData = $input.first()?.json || {};\nconst wcImages = tagData._wcImages || $('Code - Collect Image IDs & Prepare Tags').first().json._wcImages || [];\nconst variationImageMap = tagData._variationImageMap || $('Code - Collect Image IDs & Prepare Tags').first().json._variationImageMap || {};\nconst tagIds = tagData._tagIds || [];\n\n// --- Base product payload ---\nconst product = {\n  name: formData.name || 'Product',\n  type: 'variable',\n  description: formData.description || '',\n  images: wcImages\n};\n\n// --- Optional: Regular price at parent level ---\nif (formData.regularPrice && formData.regularPrice !== '' && formData.regularPrice !== null) {\n  product.regular_price = formData.regularPrice.toString();\n}\n\n// --- Optional: Sale price at parent level ---\nif (formData.salePrice && formData.salePrice !== '' && formData.salePrice !== null) {\n  product.sale_price = formData.salePrice.toString();\n}\n\n// --- Optional: SKU ---\nif (formData.sku && formData.sku !== '') {\n  product.sku = formData.sku.toString();\n}\n\n// --- Categories ---\nif (formData.categories && formData.categories.length > 0) {\n  product.categories = formData.categories.map(id => ({ id: parseInt(id) }));\n}\n\n// --- Tags ---\nif (tagIds.length > 0) {\n  product.tags = tagIds.map(id => ({ id: parseInt(id) }));\n}\n\n// --- Stock logic (parent-level) ---\nswitch (formData.stockMode) {\n  case 'in_stock':\n    product.manage_stock = false;\n    product.stock_status = 'instock';\n    break;\n  case 'out_of_stock':\n    product.manage_stock = false;\n    product.stock_status = 'outofstock';\n    break;\n  case 'track_quantity':\n    product.manage_stock = true;\n    if (formData.quantity !== null && formData.quantity !== undefined) {\n      product.stock_quantity = parseInt(formData.quantity);\n    }\n    break;\n  default:\n    product.manage_stock = false;\n    product.stock_status = 'instock';\n}\n\n// --- Attributes (variable product specific) ---\nif (formData.attributes && formData.attributes.length > 0) {\n  product.attributes = formData.attributes.map(attr => ({\n    id: attr.id ? parseInt(attr.id) : undefined,\n    name: attr.name || '',\n    options: attr.options || [],\n    variation: attr.variation !== false,\n    visible: attr.visible !== false\n  }));\n}\n\nreturn [{\n  json: {\n    _productPayload: product,\n    _brandId: formData.brandId || null,\n    _brandIds: formData.brandIds || (formData.brandId ? [formData.brandId] : []),\n    _variations: formData.variations || [],\n    _variationImageMap: variationImageMap\n  }\n}];\n"
+      },
+      "id": "b8000001-0001-4000-8000-000000000015",
+      "name": "Code - Build Variable Product Payload",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2064,
+        1072
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://acordell.com/wp-json/wc/v3/products",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json._productPayload) }}",
+        "options": {}
+      },
+      "id": "b8000001-0001-4000-8000-000000000016",
+      "name": "HTTP Request - Create WooCommerce Product",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -1824,
+        1072
+      ],
+      "notesInFlow": true,
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "pFuwiC8TcTVK4M4S",
+          "name": "Acordell Shop manager"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "notes": "Creates the WooCommerce variable product (parent).\nThe payload includes: name, type=variable, description,\nimages (with media IDs), categories, tags, stock config,\nand attributes array (used for variations)."
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================================\n// PROCESS PRODUCT CREATION RESULT & PREPARE VARIATIONS\n// ============================================================\nconst items = $input.all();\nconst data = items[0]?.json || {};\nconst formData = $('Code - Validate Input').first().json._formData || {};\nconst buildData = $('Code - Build Variable Product Payload').first().json || {};\nconst variationsData = buildData._variations || [];\nconst variationImageMap = buildData._variationImageMap || {};\nconst brandIds = buildData._brandIds || formData.brandIds || [];\n\n// Check if product was created successfully\nif (!data.id) {\n  return [{\n    json: {\n      _error: true,\n      success: false,\n      message: 'Failed to create variable product: ' + (data.message || JSON.stringify(data))\n    }\n  }];\n}\n\nreturn [{\n  json: {\n    _productId: data.id,\n    _productName: data.name || formData.name || 'Product',\n    _brandId: formData.brandId || (brandIds[0] || null),\n    _brandIds: brandIds,\n    _productCreated: true,\n    _variations: variationsData,\n    _variationImageMap: variationImageMap\n  }\n}];\n"
+      },
+      "id": "b8000001-0001-4000-8000-000000000017",
+      "name": "Code - Check Product Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1584,
+        1072
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "condition-product-ok",
+              "leftValue": "={{ $json._productCreated }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "b8000001-0001-4000-8000-000000000018",
+      "name": "IF - Product Created OK",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -1360,
+        1072
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================================\n// PREPARE VARIATION BATCH PAYLOAD\n// ============================================================\n// Instead of creating N output items (N API calls),\n// build a single batch payload for WooCommerce's batch endpoint.\n// POST /wc/v3/products/{id}/variations/batch { create: [...] }\n// Reduces N API calls to 1 — dramatically lowers server load.\n\nconst items = $input.all();\nconst productId = items[0].json._productId;\nconst productName = items[0].json._productName;\nconst brandId = items[0].json._brandId;\nconst brandIds = items[0].json._brandIds || (brandId ? [brandId] : []);\nconst variations = items[0].json._variations || [];\nconst variationImageMap = items[0].json._variationImageMap || {};\n\nif (variations.length === 0) {\n  return [{\n    json: {\n      _productId: productId,\n      _productName: productName,\n      _brandId: brandId,\n      _brandIds: brandIds,\n      _noVariations: true,\n      _batchPayload: null\n    }\n  }];\n}\n\nconst batchCreate = variations.map((variation, idx) => {\n  const payload = {\n    attributes: (variation.attributes || []).map(attr => ({\n      id: attr.id ? parseInt(attr.id) : undefined,\n      name: attr.name || '',\n      option: attr.option || ''\n    }))\n  };\n\n  // Attach Variation Specific Image if uploaded\n  if (variationImageMap[idx]) {\n    payload.image = { id: parseInt(variationImageMap[idx]) };\n  } else if (variation.image_id) {\n    payload.image = { id: parseInt(variation.image_id) };\n  }\n\n  // Regular price (required on each variation)\n  if (variation.regular_price !== undefined && variation.regular_price !== null) {\n    payload.regular_price = variation.regular_price.toString();\n  }\n\n  // Sale price (optional)\n  if (variation.sale_price && variation.sale_price !== '' && variation.sale_price !== null) {\n    payload.sale_price = variation.sale_price.toString();\n  }\n\n  // SKU (optional)\n  if (variation.sku && variation.sku !== '') {\n    payload.sku = variation.sku.toString();\n  }\n\n  // Flags: virtual, downloadable, status\n  if (variation.virtual !== undefined) payload.virtual = Boolean(variation.virtual);\n  if (variation.downloadable !== undefined) payload.downloadable = Boolean(variation.downloadable);\n  if (variation.status) payload.status = variation.status;\n\n  // Weight & Dimensions\n  if (variation.weight) payload.weight = variation.weight.toString();\n  if (variation.dimensions && typeof variation.dimensions === 'object') {\n    payload.dimensions = {\n      length: (variation.dimensions.length || '').toString(),\n      width: (variation.dimensions.width || '').toString(),\n      height: (variation.dimensions.height || '').toString()\n    };\n  }\n\n  // Description\n  if (variation.description) payload.description = variation.description.toString();\n\n  // GTIN / UPC / EAN metadata\n  if (variation.gtin || variation.upc || variation.ean) {\n    payload.meta_data = payload.meta_data || [];\n    if (variation.gtin) payload.meta_data.push({ key: '_gtin', value: variation.gtin });\n    if (variation.upc) payload.meta_data.push({ key: '_upc', value: variation.upc });\n    if (variation.ean) payload.meta_data.push({ key: '_ean', value: variation.ean });\n  }\n\n  // Stock management\n  const manageStock = Boolean(variation.manage_stock);\n  payload.manage_stock = manageStock;\n  if (manageStock) {\n    if (variation.stock_quantity !== null && variation.stock_quantity !== undefined && variation.stock_quantity !== '') {\n      payload.stock_quantity = parseInt(variation.stock_quantity);\n    }\n    payload.stock_status = (variation.stock_quantity > 0) ? 'instock' : (variation.stock_status || 'instock');\n  } else {\n    payload.stock_status = variation.stock_status || 'instock';\n  }\n\n  return payload;\n});\n\nreturn [{\n  json: {\n    _productId: productId,\n    _productName: productName,\n    _brandId: brandId,\n    _brandIds: brandIds,\n    _noVariations: false,\n    _batchPayload: { create: batchCreate }\n  }\n}];\n"
+      },
+      "id": "b8000001-0001-4000-8000-000000000019",
+      "name": "Code - Prepare Variation Batch",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1104,
+        992
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://acordell.com/wp-json/wc/v3/products/{{ $json._productId }}/variations/batch",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json._batchPayload) }}",
+        "options": {}
+      },
+      "id": "b8000001-0001-4000-8000-000000000020",
+      "name": "HTTP Request - Batch Create Variations",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -864,
+        992
+      ],
+      "notesInFlow": true,
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "pFuwiC8TcTVK4M4S",
+          "name": "Acordell Shop manager"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "notes": "Creates ALL variations in a single batch API call.\nEndpoint: POST /wp-json/wc/v3/products/{product_id}/variations/batch\nSends { create: [...all variations] } — reduces N calls to 1.\nEach variation includes: attributes, regular_price, sale_price, sku, stock config."
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================================\n// CHECK BATCH VARIATIONS RESULT & PREPARE BRAND ASSIGNMENT\n// ============================================================\n// Parses WooCommerce batch endpoint response.\n// Batch response format: { create: [...created_variation_objects] }\n\nconst items = $input.all();\nconst data = items[0]?.json || {};\nconst prepItem = $('Code - Prepare Variation Batch').first()?.json || {};\nconst productId = prepItem._productId;\nconst productName = prepItem._productName;\nconst brandId = prepItem._brandId;\nconst brandIds = prepItem._brandIds || (brandId ? [brandId] : []);\n\nconst createdVariations = [];\nconst failedVariations = [];\n\n// Batch endpoint returns { create: [...results] }\nconst batchResults = data.create || [];\n\nfor (let i = 0; i < batchResults.length; i++) {\n  const result = batchResults[i];\n  if (result.id) {\n    createdVariations.push({\n      id: result.id,\n      attributes: result.attributes || [],\n      regular_price: result.regular_price || '',\n      sale_price: result.sale_price || ''\n    });\n  } else {\n    failedVariations.push({\n      index: i,\n      error: result.error?.message || result.message || 'Unknown error'\n    });\n  }\n}\n\nreturn [{\n  json: {\n    _productId: productId,\n    _productName: productName,\n    _brandId: brandId,\n    _brandIds: brandIds,\n    _hasBrand: brandIds.length > 0,\n    _createdVariations: createdVariations,\n    _failedVariations: failedVariations,\n    _variationsOk: createdVariations.length > 0\n  }\n}];\n"
+      },
+      "id": "b8000001-0001-4000-8000-000000000021",
+      "name": "Code - Check Variations Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -624,
+        992
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "check-brand-id",
+              "leftValue": "={{ $json._hasBrand }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        -384,
+        992
+      ],
+      "id": "b8000001-0001-4000-8000-000000000022",
+      "name": "IF - Has Brand"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://acordell.com/wp-json/wp/v2/product/{{ $json._productId }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ 'product_brand': $json._brandIds && $json._brandIds.length > 0 ? $json._brandIds : [$json._brandId] }) }}",
+        "options": {}
+      },
+      "id": "b8000001-0001-4000-8000-000000000023",
+      "name": "HTTP Request - Assign Brand",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -144,
+        864
+      ],
+      "notesInFlow": true,
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "pFuwiC8TcTVK4M4S",
+          "name": "Acordell Shop manager"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "notes": "Assigns the brand term to the variable product using the WordPress REST API.\nThe product custom post type must have the brand taxonomy registered with show_in_rest=true.\nThe URL uses /wp/v2/product/{id}."
+    },
+    {
+      "parameters": {
+        "jsCode": "const productId = $('Code - Check Variations Result').first()?.json._productId;\nconst productName = $('Code - Check Variations Result').first()?.json._productName;\nconst createdVariations = $('Code - Check Variations Result').first()?.json._createdVariations || [];\nconst failedVariations = $('Code - Check Variations Result').first()?.json._failedVariations || [];\n\nreturn [{\n  json: {\n    success: true,\n    message: 'Variable product created successfully!',\n    product: {\n      id: productId || null,\n      name: productName || 'Product',\n      type: 'variable',\n      brand_assigned: true,\n      variations_created: createdVariations.length,\n      variations_failed: failedVariations.length,\n      variations: createdVariations,\n      failed_variations: failedVariations\n    }\n  }\n}];\n"
+      },
+      "id": "b8000001-0001-4000-8000-000000000024",
+      "name": "Code - Success With Brand",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        96,
+        864
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const productId = $('Code - Check Variations Result').first()?.json._productId;\nconst productName = $('Code - Check Variations Result').first()?.json._productName;\nconst createdVariations = $('Code - Check Variations Result').first()?.json._createdVariations || [];\nconst failedVariations = $('Code - Check Variations Result').first()?.json._failedVariations || [];\n\nreturn [{\n  json: {\n    success: true,\n    message: 'Variable product created successfully!',\n    product: {\n      id: productId || null,\n      name: productName || 'Product',\n      type: 'variable',\n      brand_assigned: false,\n      variations_created: createdVariations.length,\n      variations_failed: failedVariations.length,\n      variations: createdVariations,\n      failed_variations: failedVariations\n    }\n  }\n}];\n"
+      },
+      "id": "b8000001-0001-4000-8000-000000000025",
+      "name": "Code - Success No Brand",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -144,
+        1120
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json) }}",
+        "options": {
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Access-Control-Allow-Origin",
+                "value": "*"
+              },
+              {
+                "name": "Access-Control-Allow-Methods",
+                "value": "POST, OPTIONS"
+              },
+              {
+                "name": "Access-Control-Allow-Headers",
+                "value": "Content-Type"
+              }
+            ]
+          }
+        }
+      },
+      "id": "b8000001-0001-4000-8000-000000000026",
+      "name": "Respond to Webhook - Success",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        576,
+        976
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json) }}",
+        "options": {
+          "responseCode": "400",
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Access-Control-Allow-Origin",
+                "value": "*"
+              }
+            ]
+          }
+        }
+      },
+      "id": "b8000001-0001-4000-8000-000000000027",
+      "name": "Respond to Webhook - Product Error",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        -1104,
+        1264
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json) }}",
+        "options": {
+          "responseCode": "400",
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Access-Control-Allow-Origin",
+                "value": "*"
+              }
+            ]
+          }
+        }
+      },
+      "id": "b8000001-0001-4000-8000-000000000028",
+      "name": "Respond to Webhook - Image Error",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        -3024,
+        1328
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook - Create Variable Product": {
+      "main": [
+        [
+          {
+            "node": "Code - Validate Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code - Validate Input": {
+      "main": [
+        [
+          {
+            "node": "IF - Valid Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF - Valid Input": {
+      "main": [
+        [
+          {
+            "node": "Code - Prepare Image Items",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Code - Validation Error Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code - Validation Error Response": {
+      "main": [
+        [
+          {
+            "node": "Respond - Validation Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code - Prepare Image Items": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request - Upload Image to WP Media",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request - Upload Image to WP Media": {
+      "main": [
+        [
+          {
+            "node": "Code - Collect Image IDs & Prepare Tags",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code - Collect Image IDs & Prepare Tags": {
+      "main": [
+        [
+          {
+            "node": "IF - Image Upload OK",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF - Image Upload OK": {
+      "main": [
+        [
+          {
+            "node": "IF - Has Tags",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond to Webhook - Image Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF - Has Tags": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request - Create or Find Tag",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Code - No Tags",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request - Create or Find Tag": {
+      "main": [
+        [
+          {
+            "node": "Code - Aggregate Tag IDs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code - Aggregate Tag IDs": {
+      "main": [
+        [
+          {
+            "node": "Merge - Tags",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code - No Tags": {
+      "main": [
+        [
+          {
+            "node": "Merge - Tags",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Merge - Tags": {
+      "main": [
+        [
+          {
+            "node": "Code - Build Variable Product Payload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code - Build Variable Product Payload": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request - Create WooCommerce Product",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request - Create WooCommerce Product": {
+      "main": [
+        [
+          {
+            "node": "Code - Check Product Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code - Check Product Result": {
+      "main": [
+        [
+          {
+            "node": "IF - Product Created OK",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF - Product Created OK": {
+      "main": [
+        [
+          {
+            "node": "Code - Prepare Variation Batch",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond to Webhook - Product Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code - Prepare Variation Batch": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request - Batch Create Variations",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request - Batch Create Variations": {
+      "main": [
+        [
+          {
+            "node": "Code - Check Variations Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code - Check Variations Result": {
+      "main": [
+        [
+          {
+            "node": "IF - Has Brand",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF - Has Brand": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request - Assign Brand",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Code - Success No Brand",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request - Assign Brand": {
+      "main": [
+        [
+          {
+            "node": "Code - Success With Brand",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code - Success With Brand": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook - Success",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code - Success No Brand": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook - Success",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "versionId": "wf-create-variable-product-v1",
+  "meta": {
+    "instanceId": "031309915a0a453d6414710542858fed4833fec1142fbf035e6ed4b2fb5d0711"
+  },
+  "nodeGroups": [],
+  "id": "VarProdCreateWF8",
+  "tags": []
+}
