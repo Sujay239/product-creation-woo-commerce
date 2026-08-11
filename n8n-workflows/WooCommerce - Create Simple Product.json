@@ -18,13 +18,13 @@
           }
         }
       },
-      "id": "66c27926-b0e4-4779-a7e3-971f109274f5",
+      "id": "bc230314-6886-41d9-bb9f-43b91a88a4bc",
       "name": "Webhook - Create Product",
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2,
       "position": [
-        -3776,
-        400
+        -4672,
+        1264
       ],
       "webhookId": "product-create-webhook-id",
       "notesInFlow": true,
@@ -32,15 +32,15 @@
     },
     {
       "parameters": {
-        "jsCode": "// ============================================================\n// VALIDATE & PARSE incoming multipart/form-data\n// ============================================================\n// The webhook puts form text fields into $json.body (or $json)\n// and binary files into the binary properties of the item.\n\nconst items = $input.all();\nconst body = items[0]?.json?.body || items[0]?.json || {};\nconst binary = items[0]?.binary || {};\n\n// --- Extract text fields ---\nconst name = (body.name || '').trim();\nconst description = (body.description || '').trim();\nconst regularPrice = (body.regular_price || '').toString().trim();\nconst salePrice = (body.sale_price || '').toString().trim();\nconst sku = (body.sku || '').toString().trim();\nconst stockMode = (body.stock_mode || 'in_stock').trim();\nconst quantity = body.quantity ? parseInt(body.quantity) : null;\nconst galleryCount = parseInt(body.gallery_count) || 0;\n\n// Parse JSON arrays sent as strings\nlet categories = [];\ntry { categories = JSON.parse(body.categories || '[]'); } catch(e) { categories = []; }\n\nlet tags = [];\ntry { tags = JSON.parse(body.tags || '[]'); } catch(e) { tags = []; }\n\nconst brandId = body.brand ? parseInt(body.brand) : null;\n\n// --- Validation ---\nconst errors = [];\n\nif (!name) errors.push('Product name is required.');\nif (!description) errors.push('Description is required.');\nif (!regularPrice || parseFloat(regularPrice) < 0) errors.push('Valid regular price is required.');\n\nif (salePrice && parseFloat(salePrice) > parseFloat(regularPrice)) {\n  errors.push('Sale price cannot exceed regular price.');\n}\n\n// Validate stock logic\nif (stockMode === 'track_quantity') {\n  if (quantity === null || quantity === undefined || isNaN(quantity)) {\n    errors.push('Quantity is required when tracking stock.');\n  } else if (!Number.isInteger(quantity) || quantity <= 0) {\n    errors.push('Quantity must be a positive integer (>= 1).');\n  }\n}\n\n// Check for main product image in binary data\nif (!binary.product_image) {\n  errors.push('Product image is required.');\n}\n\nif (errors.length > 0) {\n  return [{\n    json: {\n      _valid: false,\n      _error: {\n        success: false,\n        message: errors.join(' ')\n      }\n    }\n  }];\n}\n\n// --- Build validated data object ---\n// This carries all parsed data forward through the workflow.\nreturn [{\n  json: {\n    _valid: true,\n    _formData: {\n      name,\n      description,\n      regularPrice,\n      salePrice: salePrice || null,\n      sku: sku || null,\n      stockMode,\n      quantity,\n      categories: Array.isArray(categories) ? categories : [],\n      tags: Array.isArray(tags) ? tags : [],\n      brandId,\n      galleryCount\n    }\n  },\n  binary: binary  // Pass binary data through\n}];\n"
+        "jsCode": "// ============================================================\n// VALIDATE & PARSE incoming multipart/form-data\n// ============================================================\nconst items = $input.all();\nconst body = items[0]?.json?.body || items[0]?.json || {};\nconst binary = items[0]?.binary || {};\n\n// --- Extract text fields ---\nconst name = (body.name || '').trim();\nconst description = (body.description || '').trim();\nconst regularPrice = (body.regular_price || '').toString().trim();\nconst salePrice = (body.sale_price || '').toString().trim();\nconst sku = (body.sku || '').toString().trim();\nconst stockMode = (body.stock_mode || 'in_stock').trim();\nconst quantity = body.quantity ? parseInt(body.quantity) : null;\nconst galleryCount = parseInt(body.gallery_count) || 0;\n\n// Parse categories (supports array, JSON string, or comma string)\nlet categories = [];\nif (Array.isArray(body.categories)) {\n  categories = body.categories;\n} else if (typeof body.categories === 'string' && body.categories.trim() !== '') {\n  try { categories = JSON.parse(body.categories); } catch(e) {\n    categories = body.categories.split(',').map(c => c.trim()).filter(Boolean);\n  }\n}\nif (!Array.isArray(categories)) categories = [categories];\n\n// Parse tags (supports array, JSON string, or comma string)\nlet tags = [];\nif (Array.isArray(body.tags)) {\n  tags = body.tags;\n} else if (typeof body.tags === 'string' && body.tags.trim() !== '') {\n  try { tags = JSON.parse(body.tags); } catch(e) {\n    tags = body.tags.split(',').map(t => t.trim()).filter(Boolean);\n  }\n}\nif (!Array.isArray(tags)) tags = [tags];\ntags = tags.map(t => typeof t === 'string' ? t.trim() : (t?.name || t)).filter(Boolean);\n\n// Parse brand(s) — supports array ([12, 34]), JSON string ('[12, 34]'), comma string ('12, 34'), or single ID\nlet brandIds = [];\nconst rawBrand = body.brands || body.brand;\n\nif (Array.isArray(rawBrand)) {\n  brandIds = rawBrand.map(b => parseInt(b)).filter(id => !isNaN(id) && id > 0);\n} else if (typeof rawBrand === 'string' && rawBrand.trim() !== '') {\n  try {\n    const parsed = JSON.parse(rawBrand);\n    if (Array.isArray(parsed)) {\n      brandIds = parsed.map(b => parseInt(b)).filter(id => !isNaN(id) && id > 0);\n    } else if (!isNaN(parseInt(parsed)) && parseInt(parsed) > 0) {\n      brandIds = [parseInt(parsed)];\n    }\n  } catch(e) {\n    brandIds = rawBrand.split(',').map(b => parseInt(b.trim())).filter(id => !isNaN(id) && id > 0);\n  }\n} else if (typeof rawBrand === 'number' && rawBrand > 0) {\n  brandIds = [rawBrand];\n}\n\nconst brandId = brandIds.length > 0 ? brandIds[0] : null;\n\n// --- Validation ---\nconst errors = [];\n\nif (!name) errors.push('Product name is required.');\nif (!description) errors.push('Description is required.');\nif (!regularPrice || parseFloat(regularPrice) < 0) errors.push('Valid regular price is required.');\n\nif (salePrice && parseFloat(salePrice) > parseFloat(regularPrice)) {\n  errors.push('Sale price cannot exceed regular price.');\n}\n\n// Validate stock logic\nif (stockMode === 'track_quantity') {\n  if (quantity === null || quantity === undefined || isNaN(quantity)) {\n    errors.push('Quantity is required when tracking stock.');\n  } else if (!Number.isInteger(quantity) || quantity <= 0) {\n    errors.push('Quantity must be a positive integer (>= 1).');\n  }\n}\n\n// Check for main product image in binary data\nif (!binary.product_image) {\n  errors.push('Product image is required.');\n}\n\nif (errors.length > 0) {\n  return [{\n    json: {\n      _valid: false,\n      _error: {\n        success: false,\n        message: errors.join(' ')\n      }\n    }\n  }];\n}\n\n// --- Build validated data object ---\nreturn [{\n  json: {\n    _valid: true,\n    _formData: {\n      name,\n      description,\n      regularPrice,\n      salePrice: salePrice || null,\n      sku: sku || null,\n      stockMode,\n      quantity,\n      categories,\n      tags,\n      brandId,\n      brandIds,\n      galleryCount\n    }\n  },\n  binary: binary\n}];\n"
       },
-      "id": "f6714fb9-2018-4e94-9a6c-7a5b30372211",
+      "id": "74c6a948-3d15-4923-b866-898529316418",
       "name": "Code - Validate Input",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        -3536,
-        400
+        -4432,
+        1264
       ]
     },
     {
@@ -68,26 +68,26 @@
         },
         "options": {}
       },
-      "id": "e1486024-dc84-41e6-adc1-3eaa04a3c97e",
+      "id": "fb2fd340-aee5-4574-a7c6-98912ac1f10a",
       "name": "IF - Valid Input",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2,
       "position": [
-        -3328,
-        400
+        -4224,
+        1264
       ]
     },
     {
       "parameters": {
         "jsCode": "// Pass through validation error to the error response node\nconst items = $input.all();\nreturn [{ json: items[0].json._error }];\n"
       },
-      "id": "03216688-9a8c-49e7-8456-ad0a3c88ac45",
+      "id": "35bf382a-6a3a-4c41-9d9c-dc7936eeaaee",
       "name": "Code - Validation Error Response",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        -3088,
-        608
+        -3984,
+        1472
       ]
     },
     {
@@ -106,26 +106,26 @@
           }
         }
       },
-      "id": "be7ec8e0-abf7-480c-9dbb-d4ad84711c6a",
+      "id": "243777c7-ed47-481b-9748-645eedc50bd6",
       "name": "Respond - Validation Error",
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.1,
       "position": [
-        -2848,
-        608
+        -3744,
+        1472
       ]
     },
     {
       "parameters": {
         "jsCode": "// ============================================================\n// PREPARE IMAGE UPLOAD ITEMS\n// ============================================================\n// Create one output item per image (main image first, then gallery).\n// Each item carries the binary under a 'file' key and metadata.\n// n8n will process all items through the next HTTP Request node.\n\nconst items = $input.all();\nconst binary = items[0].binary || {};\nconst formData = items[0].json._formData;\nconst galleryCount = formData.galleryCount || 0;\n\nconst outputItems = [];\n\n// 1. Main product image (always first)\nif (binary.product_image) {\n  outputItems.push({\n    json: {\n      _imageType: 'main',\n      _imageIndex: 0,\n      _formData: formData\n    },\n    binary: {\n      file: binary.product_image\n    }\n  });\n}\n\n// 2. Gallery images (indexed as gallery_image_0, gallery_image_1, etc.)\nfor (let i = 0; i < galleryCount; i++) {\n  const key = `gallery_image_${i}`;\n  if (binary[key]) {\n    outputItems.push({\n      json: {\n        _imageType: 'gallery',\n        _imageIndex: i + 1,\n        _formData: formData\n      },\n      binary: {\n        file: binary[key]\n      }\n    });\n  }\n}\n\nreturn outputItems;\n"
       },
-      "id": "b0035f5f-2df5-43e4-b37a-cbbd6fe29daa",
+      "id": "0ac9600d-c58e-44db-ba80-1ef648510578",
       "name": "Code - Prepare Image Items",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        -3088,
-        304
+        -3984,
+        1168
       ]
     },
     {
@@ -152,13 +152,13 @@
         "inputDataFieldName": "file",
         "options": {}
       },
-      "id": "28f3cf9c-166f-4d56-9f09-b7afdb30dae8",
+      "id": "2d73c7ca-1976-4214-b299-8b12f22b6253",
       "name": "HTTP Request - Upload Image to WP Media",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        -2848,
-        304
+        -3744,
+        1168
       ],
       "notesInFlow": true,
       "credentials": {
@@ -174,13 +174,13 @@
       "parameters": {
         "jsCode": "// ============================================================\n// COLLECT ALL UPLOADED IMAGE IDs\n// ============================================================\nconst uploadItems = $input.all();\nconst formData = $('Code - Validate Input').first().json._formData || {};\n\nlet mainImageId = null;\nconst galleryImageIds = [];\n\nfor (let i = 0; i < uploadItems.length; i++) {\n  const data = uploadItems[i].json;\n  const mediaId = data.id;\n  \n  if (!mediaId) {\n    continue;\n  }\n  \n  if (i === 0) {\n    mainImageId = mediaId;\n  } else {\n    galleryImageIds.push(mediaId);\n  }\n}\n\nif (!mainImageId) {\n  return [{\n    json: {\n      _error: true,\n      success: false,\n      message: 'Failed to upload the main product image to WordPress Media: ' + (uploadItems[0]?.json?.message || 'Media upload error')\n    }\n  }];\n}\n\n// Build the images array for WooCommerce (main image first)\nconst wcImages = [{ id: mainImageId }];\ngalleryImageIds.forEach(gid => wcImages.push({ id: gid }));\n\n// Prepare tag items if tags exist\nconst tags = formData.tags || [];\n\nif (tags.length > 0) {\n  return tags.map((tagName, idx) => ({\n    json: {\n      _tagName: tagName,\n      _tagIndex: idx,\n      _wcImages: wcImages,\n      _hasTags: true\n    }\n  }));\n} else {\n  return [{\n    json: {\n      _wcImages: wcImages,\n      _hasTags: false,\n      _tagIds: []\n    }\n  }];\n}\n"
       },
-      "id": "872c44ad-300f-4e9e-a0ce-cef23d35eb6c",
+      "id": "d2b827f6-bb61-451b-9f0f-6f82bd67e3dc",
       "name": "Code - Collect Image IDs & Prepare Tags",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        -2608,
-        304
+        -3504,
+        1168
       ]
     },
     {
@@ -208,13 +208,13 @@
         },
         "options": {}
       },
-      "id": "4bfdcb96-d4c5-483c-a972-b7ce47e5ab1f",
+      "id": "7de57980-7b20-4fcd-9abe-3f37843c29ce",
       "name": "IF - Image Upload OK",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2,
       "position": [
-        -2368,
-        304
+        -3264,
+        1168
       ]
     },
     {
@@ -242,13 +242,13 @@
         },
         "options": {}
       },
-      "id": "f892f5ae-be7f-4068-9fc2-6a49d8745ea3",
+      "id": "075f123e-e6f4-40de-849f-e841b1895c15",
       "name": "IF - Has Tags",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2,
       "position": [
-        -2128,
-        208
+        -3024,
+        1072
       ]
     },
     {
@@ -268,13 +268,13 @@
         },
         "options": {}
       },
-      "id": "77ffc9c1-9021-4c6b-84f4-e4080f634984",
+      "id": "b2dbc2fa-2633-4290-85da-e2ff39390222",
       "name": "HTTP Request - Create or Find Tag",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        -1888,
-        112
+        -2784,
+        976
       ],
       "notesInFlow": true,
       "credentials": {
@@ -288,52 +288,52 @@
     },
     {
       "parameters": {
-        "jsCode": "// ============================================================\n// AGGREGATE TAG IDs\n// ============================================================\nconst items = $input.all();\nconst tagIds = [];\n\nfor (const item of items) {\n  const data = item.json;\n  if (data.id) {\n    tagIds.push(data.id);\n  } else if (data.code === 'term_exists' && data.data?.resource_id) {\n    tagIds.push(data.data.resource_id);\n  }\n}\n\nconst wcImages = $('Code - Collect Image IDs & Prepare Tags').first().json._wcImages || [];\n\nreturn [{\n  json: {\n    _wcImages: wcImages,\n    _tagIds: tagIds\n  }\n}];\n"
+        "jsCode": "// ============================================================\n// AGGREGATE TAG IDs (HANDLES NEW & PRE-EXISTING TAGS)\n// ============================================================\nconst items = $input.all();\nconst tagIds = [];\n\nfor (const item of items) {\n  const data = item.json || {};\n  \n  // Case 1: Tag was freshly created\n  if (data.id) {\n    tagIds.push(parseInt(data.id));\n    continue;\n  }\n  \n  // Case 2: Tag already existed (term_exists in data.data.resource_id)\n  if (data.data?.resource_id) {\n    tagIds.push(parseInt(data.data.resource_id));\n    continue;\n  }\n  \n  // Case 3: Tag already existed but wrapped in n8n/Axios error object\n  const rawStr = JSON.stringify(data);\n  const match = rawStr.match(/resource_id[^0-9]+(\\d+)/i);\n  if (match && match[1]) {\n    tagIds.push(parseInt(match[1]));\n  }\n}\n\nconst wcImages = $('Code - Collect Image IDs & Prepare Tags').first().json._wcImages || [];\n\nreturn [{\n  json: {\n    _wcImages: wcImages,\n    _tagIds: tagIds\n  }\n}];\n"
       },
-      "id": "be87086f-d00b-4da1-bd04-68433b5e3593",
+      "id": "52190130-95a4-4478-a2f7-dd49da0ec30b",
       "name": "Code - Aggregate Tag IDs",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        -1648,
-        112
+        -2544,
+        976
       ]
     },
     {
       "parameters": {
         "jsCode": "const wcImages = $('Code - Collect Image IDs & Prepare Tags').first().json._wcImages || [];\nreturn [{\n  json: {\n    _wcImages: wcImages,\n    _tagIds: []\n  }\n}];\n"
       },
-      "id": "6786cbc5-03fe-4179-a757-c6fd2943dc64",
+      "id": "70f69768-b171-4685-b602-c448aff4d998",
       "name": "Code - No Tags",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        -1888,
-        320
+        -2784,
+        1184
       ]
     },
     {
       "parameters": {},
-      "id": "fc89baf9-c29f-492d-8f01-f27c404c3d7d",
+      "id": "b4366a91-0bb8-4f44-9d85-5c4bd303534c",
       "name": "Merge - Tags",
       "type": "n8n-nodes-base.merge",
       "typeVersion": 3,
       "position": [
-        -1408,
-        208
+        -2304,
+        1072
       ]
     },
     {
       "parameters": {
         "jsCode": "// ============================================================\n// BUILD WOOCOMMERCE PRODUCT PAYLOAD\n// ============================================================\nconst formData = $('Code - Validate Input').first().json._formData || {};\nconst tagData = $input.first()?.json || {};\nconst wcImages = tagData._wcImages || $('Code - Collect Image IDs & Prepare Tags').first().json._wcImages || [];\nconst tagIds = tagData._tagIds || [];\n\n// --- Base product payload ---\nconst product = {\n  name: formData.name || 'Product',\n  type: 'simple',\n  description: formData.description || '',\n  regular_price: (formData.regularPrice !== undefined && formData.regularPrice !== null) ? formData.regularPrice.toString() : '',\n  images: wcImages\n};\n\n// --- Optional: Sale price ---\nif (formData.salePrice && formData.salePrice !== '' && formData.salePrice !== null) {\n  product.sale_price = formData.salePrice.toString();\n}\n\n// --- Optional: SKU ---\nif (formData.sku && formData.sku !== '') {\n  product.sku = formData.sku.toString();\n}\n\n// --- Categories ---\nif (formData.categories && formData.categories.length > 0) {\n  product.categories = formData.categories.map(id => ({ id: parseInt(id) }));\n}\n\n// --- Tags ---\nif (tagIds.length > 0) {\n  product.tags = tagIds.map(id => ({ id: parseInt(id) }));\n}\n\n// --- Stock logic ---\nswitch (formData.stockMode) {\n  case 'in_stock':\n    product.manage_stock = false;\n    product.stock_status = 'instock';\n    break;\n  case 'out_of_stock':\n    product.manage_stock = false;\n    product.stock_status = 'outofstock';\n    break;\n  case 'track_quantity':\n    product.manage_stock = true;\n    if (formData.quantity !== null && formData.quantity !== undefined) {\n      product.stock_quantity = parseInt(formData.quantity);\n    }\n    break;\n  default:\n    product.manage_stock = false;\n    product.stock_status = 'instock';\n}\n\nreturn [{\n  json: {\n    _productPayload: product,\n    _brandId: formData.brandId || null\n  }\n}];\n"
       },
-      "id": "2f6ab48d-bcc0-455c-98a8-b3ddfaa65cd1",
+      "id": "56389bfb-dd04-4164-a9f0-c2bf5f5c61e6",
       "name": "Code - Build Product Payload",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        -1168,
-        208
+        -2064,
+        1072
       ]
     },
     {
@@ -347,13 +347,13 @@
         "jsonBody": "={{ JSON.stringify($json._productPayload) }}",
         "options": {}
       },
-      "id": "2c6c0c8d-92a4-406d-bd6a-7b0a3100543d",
+      "id": "df3638b9-4ed2-4f0f-be9c-97d7db9c6fa9",
       "name": "HTTP Request - Create WooCommerce Product",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        -928,
-        208
+        -1824,
+        1072
       ],
       "notesInFlow": true,
       "credentials": {
@@ -367,15 +367,15 @@
     },
     {
       "parameters": {
-        "jsCode": "// ============================================================\n// PROCESS PRODUCT CREATION RESULT & PREPARE BRAND ASSIGNMENT\n// ============================================================\nconst items = $input.all();\nconst data = items[0]?.json || {};\nconst formData = $('Code - Validate Input').first().json._formData || {};\n\n// Check if product was created successfully\nif (!data.id) {\n  return [{\n    json: {\n      _error: true,\n      success: false,\n      message: 'Failed to create product: ' + (data.message || JSON.stringify(data))\n    }\n  }];\n}\n\nreturn [{\n  json: {\n    _productId: data.id,\n    _productName: data.name || formData.name || 'Product',\n    _brandId: formData.brandId || null,\n    _productCreated: true\n  }\n}];\n"
+        "jsCode": "// ============================================================\n// PROCESS PRODUCT CREATION RESULT & PREPARE BRAND ASSIGNMENT\n// ============================================================\nconst items = $input.all();\nconst data = items[0]?.json || {};\nconst formData = $('Code - Validate Input').first().json._formData || {};\nconst brandIds = formData.brandIds || (formData.brandId ? [formData.brandId] : []);\n\n// Check if product was created successfully\nif (!data.id) {\n  return [{\n    json: {\n      _error: true,\n      success: false,\n      message: 'Failed to create product: ' + (data.message || JSON.stringify(data))\n    }\n  }];\n}\n\nreturn [{\n  json: {\n    _productId: data.id,\n    _productName: data.name || formData.name || 'Product',\n    _brandId: formData.brandId || (brandIds[0] || null),\n    _brandIds: brandIds,\n    _hasBrand: brandIds.length > 0,\n    _productCreated: true\n  }\n}];\n"
       },
-      "id": "d500ca15-4de7-421c-8c85-50d938db210d",
+      "id": "ad9bd0cb-7bae-41d2-9b6f-01148c132bb2",
       "name": "Code - Check Product Result",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        -688,
-        208
+        -1584,
+        1072
       ]
     },
     {
@@ -403,47 +403,13 @@
         },
         "options": {}
       },
-      "id": "8af69189-8a10-44a4-bb99-ec6fafe22b11",
+      "id": "a63f8710-63cd-488b-a9ae-d4be21b615a8",
       "name": "IF - Product Created OK",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2,
       "position": [
-        -464,
-        208
-      ]
-    },
-    {
-      "parameters": {
-        "conditions": {
-          "options": {
-            "caseSensitive": true,
-            "leftValue": "",
-            "typeValidation": "strict",
-            "version": 1
-          },
-          "conditions": [
-            {
-              "id": "condition-has-brand",
-              "leftValue": "={{ $json._brandId }}",
-              "rightValue": "",
-              "operator": {
-                "type": "string",
-                "operation": "isNotEmpty",
-                "name": "filter.operator.isNotEmpty"
-              }
-            }
-          ],
-          "combinator": "and"
-        },
-        "options": {}
-      },
-      "id": "1830b91e-b880-4a70-a528-79b958683400",
-      "name": "IF - Has Brand",
-      "type": "n8n-nodes-base.if",
-      "typeVersion": 2,
-      "position": [
-        -240,
-        112
+        -1360,
+        1072
       ]
     },
     {
@@ -454,22 +420,22 @@
         "genericAuthType": "httpBasicAuth",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ 'product_brand': [$json._brandId] }) }}",
+        "jsonBody": "={{ JSON.stringify({ 'product_brand': $json._brandIds && $json._brandIds.length > 0 ? $json._brandIds : [$json._brandId] }) }}",
         "options": {}
       },
-      "id": "8af98409-8eba-4395-aa1f-d816859e0758",
+      "id": "7a899b8a-3f74-4c77-bd70-c89df3080d4b",
       "name": "HTTP Request - Assign Brand",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        0,
-        0
+        -896,
+        864
       ],
       "notesInFlow": true,
       "credentials": {
         "httpBasicAuth": {
-          "id": "upKkAgwBWe3ytLbu",
-          "name": "Sugar story shop manager"
+          "id": "pFuwiC8TcTVK4M4S",
+          "name": "Acordell Shop manager"
         }
       },
       "onError": "continueRegularOutput",
@@ -479,37 +445,26 @@
       "parameters": {
         "jsCode": "const createdProduct = $('HTTP Request - Create WooCommerce Product').first()?.json || {};\n\nreturn [{\n  json: {\n    success: true,\n    message: 'Product created successfully!',\n    product: {\n      id: createdProduct.id || null,\n      name: createdProduct.name || 'Product',\n      brand_assigned: true\n    }\n  }\n}];\n"
       },
-      "id": "00b919c1-4854-4467-9411-12928dd658af",
+      "id": "4251606b-6746-4dbd-aac8-c4038199e1e8",
       "name": "Code - Success With Brand",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        240,
-        0
+        -656,
+        864
       ]
     },
     {
       "parameters": {
         "jsCode": "const createdProduct = $('HTTP Request - Create WooCommerce Product').first()?.json || {};\n\nreturn [{\n  json: {\n    success: true,\n    message: 'Product created successfully!',\n    product: {\n      id: createdProduct.id || null,\n      name: createdProduct.name || 'Product',\n      brand_assigned: false\n    }\n  }\n}];\n"
       },
-      "id": "8c02abb9-b8ff-4df0-b469-beb31ac262b3",
+      "id": "3811c380-fa7b-4ba4-9b62-d531000a507a",
       "name": "Code - Success No Brand",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        0,
-        224
-      ]
-    },
-    {
-      "parameters": {},
-      "id": "3598c378-a4af-4ceb-b02d-b9fbe3f8a42a",
-      "name": "Merge - Brand",
-      "type": "n8n-nodes-base.merge",
-      "typeVersion": 3,
-      "position": [
-        480,
-        112
+        -896,
+        1088
       ]
     },
     {
@@ -535,13 +490,13 @@
           }
         }
       },
-      "id": "46edaa29-41aa-48ac-80ca-9d2324ad4ea2",
+      "id": "a38cc125-c6d7-4356-bf8f-c072dd8da2e6",
       "name": "Respond to Webhook - Success",
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.1,
       "position": [
-        720,
-        112
+        -176,
+        976
       ]
     },
     {
@@ -560,13 +515,13 @@
           }
         }
       },
-      "id": "66335a09-2200-48dc-b3a4-ab38b5455aa3",
+      "id": "68f7ea4a-316a-456c-8ea2-672d5ab95923",
       "name": "Respond to Webhook - Product Error",
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.1,
       "position": [
-        0,
-        400
+        -896,
+        1264
       ]
     },
     {
@@ -585,98 +540,51 @@
           }
         }
       },
-      "id": "7dc730b9-8034-4c3a-98e5-603451a88358",
+      "id": "11c73914-5f54-43a4-9717-3251059a9b76",
       "name": "Respond to Webhook - Image Error",
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.1,
       "position": [
-        -2128,
-        464
+        -3024,
+        1328
       ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "1df567f0-71a6-449e-b4f0-8f5998a8a804",
+              "leftValue": "={{ $json._hasBrand }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        -1104,
+        992
+      ],
+      "id": "0e64be51-3a5f-463d-8073-babed3808fe2",
+      "name": "IF - Has Brand"
     }
   ],
-  "pinData": {
-    "Webhook - Create Product": [
-      {
-        "json": {
-          "headers": {
-            "host": "n8n.srv917960.hstgr.cloud",
-            "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36 Edg/151.0.0.0",
-            "content-length": "4477095",
-            "accept": "*/*",
-            "accept-encoding": "gzip, deflate, br, zstd",
-            "accept-language": "en-US,en;q=0.9,en-IN;q=0.8",
-            "content-type": "multipart/form-data; boundary=----WebKitFormBoundaryK9zobeQatma5yVFS",
-            "origin": "http://127.0.0.1:5500",
-            "priority": "u=1, i",
-            "referer": "http://127.0.0.1:5500/",
-            "sec-ch-ua": "\"Not=A?Brand\";v=\"99\", \"Microsoft Edge\";v=\"151\", \"Chromium\";v=\"151\"",
-            "sec-ch-ua-mobile": "?0",
-            "sec-ch-ua-platform": "\"Windows\"",
-            "sec-fetch-dest": "empty",
-            "sec-fetch-mode": "cors",
-            "sec-fetch-site": "cross-site",
-            "x-forwarded-for": "172.19.0.1",
-            "x-forwarded-host": "n8n.srv917960.hstgr.cloud",
-            "x-forwarded-port": "443",
-            "x-forwarded-proto": "https",
-            "x-forwarded-server": "79229352e0fb",
-            "x-real-ip": "172.19.0.1"
-          },
-          "params": {},
-          "query": {},
-          "body": {
-            "name": "test",
-            "description": "testing creation from out source",
-            "categories": "[336]",
-            "brand": "338",
-            "tags": "[]",
-            "regular_price": "1500",
-            "sale_price": "798.86",
-            "stock_mode": "in_stock",
-            "gallery_count": "2"
-          },
-          "webhookUrl": "https://n8n.srv917960.hstgr.cloud/webhook/create-product-acordell",
-          "executionMode": "production"
-        },
-        "binary": {
-          "product_image": {
-            "mimeType": "image/png",
-            "fileType": "image",
-            "fileExtension": "png",
-            "data": "filesystem-v2",
-            "fileName": "Screenshot 2026-07-10 225655.png",
-            "id": "filesystem-v2:workflows/DVJAenBHxMOTJxpZ/executions/115028/binary_data/e615acd7-557c-467f-83e4-f5cf25bfc5a7",
-            "fileSize": "371 kB",
-            "bytes": 371455
-          },
-          "gallery_image_0": {
-            "mimeType": "image/png",
-            "fileType": "image",
-            "fileExtension": "png",
-            "data": "filesystem-v2",
-            "fileName": "Screenshot 2024-12-26 121109.png",
-            "id": "filesystem-v2:workflows/DVJAenBHxMOTJxpZ/executions/115028/binary_data/27c92c0e-5f0b-4e78-aee7-3f65a314a7dc",
-            "fileSize": "2.63 MB",
-            "bytes": 2634048
-          },
-          "gallery_image_1": {
-            "mimeType": "image/png",
-            "fileType": "image",
-            "fileExtension": "png",
-            "data": "filesystem-v2",
-            "fileName": "Screenshot 2026-05-23 002234.png",
-            "id": "filesystem-v2:workflows/DVJAenBHxMOTJxpZ/executions/115028/binary_data/b3125490-307f-424f-8bc0-8d163efaef2d",
-            "fileSize": "1.47 MB",
-            "bytes": 1470106
-          }
-        },
-        "pairedItem": {
-          "item": 0
-        }
-      }
-    ]
-  },
+  "pinData": {},
   "connections": {
     "Webhook - Create Product": {
       "main": [
@@ -879,7 +787,7 @@
       "main": [
         [
           {
-            "node": "IF - Has Brand",
+            "node": "If",
             "type": "main",
             "index": 0
           }
@@ -887,24 +795,6 @@
         [
           {
             "node": "Respond to Webhook - Product Error",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "IF - Has Brand": {
-      "main": [
-        [
-          {
-            "node": "HTTP Request - Assign Brand",
-            "type": "main",
-            "index": 0
-          }
-        ],
-        [
-          {
-            "node": "Code - Success No Brand",
             "type": "main",
             "index": 0
           }
@@ -926,7 +816,7 @@
       "main": [
         [
           {
-            "node": "Merge - Brand",
+            "node": "Respond to Webhook - Success",
             "type": "main",
             "index": 0
           }
@@ -937,18 +827,25 @@
       "main": [
         [
           {
-            "node": "Merge - Brand",
+            "node": "Respond to Webhook - Success",
             "type": "main",
-            "index": 1
+            "index": 0
           }
         ]
       ]
     },
-    "Merge - Brand": {
+    "If": {
       "main": [
         [
           {
-            "node": "Respond to Webhook - Success",
+            "node": "HTTP Request - Assign Brand",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Code - Success No Brand",
             "type": "main",
             "index": 0
           }
@@ -962,7 +859,7 @@
     "binaryMode": "separate",
     "availableInMCP": false
   },
-  "versionId": "657df3bb-c82f-4bcc-be73-25be7b3d9aa4",
+  "versionId": "41f4ed6e-44c6-4b62-843c-0970cad6c2fd",
   "meta": {
     "instanceId": "031309915a0a453d6414710542858fed4833fec1142fbf035e6ed4b2fb5d0711"
   },

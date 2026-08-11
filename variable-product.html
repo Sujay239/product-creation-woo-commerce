@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Add Variable Product — WooCommerce</title>
+    <meta name="description" content="Create a WooCommerce variable product with custom attributes, terms, and variations.">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="variable-product.css">
+</head>
+<body>
+
+<!-- ===== TOP NAVIGATION BAR ===== -->
+<header class="top-nav">
+    <a href="#" class="nav-brand">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"></path>
+            <line x1="3" y1="6" x2="21" y2="6"></line>
+            <path d="M16 10a4 4 0 0 1-8 0"></path>
+        </svg>
+        <span>WooCommerce Studio</span>
+        <span class="nav-badge">Variable</span>
+    </a>
+    <nav class="nav-links">
+        <a href="index.html" class="nav-link">Simple Product</a>
+        <a href="variable-product.html" class="nav-link active">Variable Product</a>
+    </nav>
+</header>
+
+<div class="container">
+    <!-- ===== PAGE HEADER ===== -->
+    <div class="page-header">
+        <h1>Add New Variable Product</h1>
+        <p>Configure product attributes, generate variations, and manage individual variation pricing and stock</p>
+    </div>
+
+    <!-- ===== FORM CARD ===== -->
+    <div class="form-card">
+        <form id="variableProductForm" novalidate>
+
+            <!-- ============================================================
+                 SECTION 1: PRODUCT INFO
+                 ============================================================ -->
+            <div class="section-title">
+                <span>Product Information</span>
+                <span class="section-badge">General</span>
+            </div>
+
+            <div class="form-group">
+                <label for="productName">Product Name <span class="required-star">*</span></label>
+                <input type="text" id="productName" placeholder="e.g. Men's Cotton T-Shirt" required>
+            </div>
+
+            <div class="form-group">
+                <label for="productDescription">Description <span class="required-star">*</span></label>
+                <textarea id="productDescription" placeholder="Enter detailed product description..." required></textarea>
+            </div>
+
+            <!-- ============================================================
+                 SECTION 2: PRODUCT IMAGES
+                 ============================================================ -->
+            <div class="section-title">
+                <span>Product Images</span>
+                <span class="section-badge">Media</span>
+            </div>
+
+            <div class="form-group">
+                <label>Main Product Image <span class="required-star">*</span></label>
+                <div class="file-input-wrap">
+                    <input type="file" id="productImage" accept=".jpg,.jpeg,.png,.webp" onchange="previewMainImage()">
+                </div>
+                <div class="image-preview-grid" id="mainImagePreview"></div>
+            </div>
+
+            <div class="form-group">
+                <label>Gallery Images <span class="optional">(Optional)</span></label>
+                <div class="file-input-wrap">
+                    <input type="file" id="galleryImages" accept=".jpg,.jpeg,.png,.webp" multiple onchange="previewGalleryImages()">
+                </div>
+                <div class="image-preview-grid" id="galleryPreview"></div>
+            </div>
+
+            <!-- ============================================================
+                 SECTION 3: ORGANIZATION
+                 ============================================================ -->
+            <div class="section-title">
+                <span>Organization</span>
+                <span class="section-badge">Taxonomies</span>
+            </div>
+
+            <!-- Categories -->
+            <div class="form-group">
+                <label>Categories</label>
+                <div class="inline-group">
+                    <div class="field-wrap">
+                        <div class="multi-select" id="categoryMultiSelect">
+                            <div class="multi-select-trigger" id="categoryTrigger" onclick="toggleCategoryDropdown()">
+                                <span class="placeholder" id="categoryPlaceholder">Select categories...</span>
+                                <span class="arrow">▾</span>
+                            </div>
+                            <div class="multi-select-dropdown" id="categoryDropdown">
+                                <div class="ms-loading" id="categoryLoading">Loading categories<span class="loading-dots"></span></div>
+                                <div id="categoryList"></div>
+                                <div class="ms-empty" id="categoryEmpty" style="display:none;">No categories found</div>
+                            </div>
+                        </div>
+                    </div>
+                    <button type="button" class="add-btn" onclick="openModal('category')" title="Add New Category">+</button>
+                </div>
+            </div>
+
+            <!-- Brand -->
+            <div class="form-group">
+                <label>Brand</label>
+                <div class="inline-group">
+                    <div class="field-wrap">
+                        <select id="brandSelect">
+                            <option value="">Loading brands...</option>
+                        </select>
+                    </div>
+                    <button type="button" class="add-btn" onclick="openModal('brand')" title="Add New Brand">+</button>
+                </div>
+            </div>
+
+            <!-- Product Tags -->
+            <div class="form-group">
+                <label>Product Tags</label>
+                <div class="tag-input-wrapper" id="tagWrapper" onclick="document.getElementById('tagInput').focus()">
+                    <input type="text" class="tag-input-field" id="tagInput"
+                           placeholder="Type a tag and press comma or Enter"
+                           onkeydown="handleTagKeydown(event)"
+                           onpaste="handleTagPaste(event)"
+                           onblur="handleTagBlur()"
+                           oninput="handleTagInput(event)">
+                </div>
+                <small>Separate tags with commas</small>
+            </div>
+
+            <!-- Parent SKU -->
+            <div class="form-group">
+                <label for="parentSku">Parent SKU <span class="optional">(Optional)</span></label>
+                <input type="text" id="parentSku" placeholder="e.g. TSHIRT-PARENT">
+                <small>Parent product SKU. Individual variations can have their own SKU below.</small>
+            </div>
+
+            <!-- ============================================================
+                 SECTION 4: ATTRIBUTES FOR VARIATIONS
+                 ============================================================ -->
+            <div class="section-title">
+                <span>Product Attributes</span>
+                <span class="section-badge">Attributes</span>
+            </div>
+
+            <!-- Attribute Selector Box -->
+            <div class="attribute-adder-box">
+                <div class="attribute-adder-row">
+                    <div style="flex: 1;">
+                        <select id="availableAttributesSelect" onchange="if(this.value) addAttributeToProduct()">
+                            <option value="">Loading attributes from database...</option>
+                        </select>
+                    </div>
+                    <button type="button" class="btn-primary-sm" onclick="addAttributeToProduct()">
+                        + Add Attribute
+                    </button>
+                    <button type="button" class="btn-secondary" onclick="openModal('attribute')">
+                        + New Attribute
+                    </button>
+                </div>
+            </div>
+
+            <!-- Added Attributes List -->
+            <div class="attributes-list" id="attributesList">
+                <!-- Dynamically populated attribute cards will appear here -->
+            </div>
+
+            <!-- ============================================================
+                 SECTION 5: VARIATIONS GENERATOR & CARDS
+                 ============================================================ -->
+            <div class="section-title">
+                <span>Product Variations</span>
+                <span class="section-badge" id="variationCountBadge">0 Variations</span>
+            </div>
+
+            <!-- Alert Notice (like WooCommerce banner in screenshot) -->
+            <div class="variations-header-banner" id="variationNoticeBanner">
+                <div class="banner-text">
+                    <span class="banner-icon">ℹ️</span>
+                    <span>Variations must have prices to be active in your store. Use the button below to generate all combinations.</span>
+                </div>
+            </div>
+
+            <!-- Variations Actions Toolbar -->
+            <div class="variations-toolbar">
+                <div class="variations-toolbar-left">
+                    <button type="button" class="btn-generate" onclick="generateAllVariations()">
+                        <span>⚡ Generate All Variations</span>
+                    </button>
+                    <button type="button" class="btn-secondary" onclick="addCustomVariation()">
+                        <span>+ Add Manual Variation</span>
+                    </button>
+                </div>
+                <div class="variations-toolbar-right">
+                    <button type="button" class="btn-xs" onclick="toggleAllVariationsCollapse(false)" title="Expand all variation cards">Expand All</button>
+                    <button type="button" class="btn-xs" onclick="toggleAllVariationsCollapse(true)" title="Collapse all variation cards">Collapse All</button>
+                    <button type="button" class="btn-xs" onclick="openModal('bulkPrice')" title="Set a regular price for all variations">Set Bulk Price</button>
+                    <button type="button" class="btn-xs" onclick="removeAllVariations()" style="color: var(--error);" title="Clear all generated variations">Remove All</button>
+                </div>
+            </div>
+
+            <!-- Variations Container (Holds all variation accordion cards) -->
+            <div class="variations-container" id="variationsContainer">
+                <div class="empty-variations-placeholder" id="emptyVariationsPlaceholder">
+                    <div class="empty-variations-icon">📦</div>
+                    <h4>No variations generated yet</h4>
+                    <p style="font-size: 13px; margin-top: 4px;">Select attributes and terms above, then click <strong>"Generate All Variations"</strong>.</p>
+                </div>
+            </div>
+
+            <!-- ============================================================
+                 SECTION 6: SUBMISSION
+                 ============================================================ -->
+            <div class="submit-section">
+                <button type="submit" class="submit-btn" id="submitBtn">
+                    <span class="spinner"></span>
+                    <span class="btn-text">Create Variable Product</span>
+                </button>
+            </div>
+
+        </form>
+    </div>
+</div>
+
+<!-- ===== TOAST NOTIFICATION CONTAINER ===== -->
+<div class="toast-container" id="toastContainer"></div>
+
+<!-- ============================================================
+     MODAL: CREATE CATEGORY
+     ============================================================ -->
+<div class="modal-overlay" id="categoryModal">
+    <div class="modal">
+        <h3>Create New Category</h3>
+        <div class="form-group">
+            <label for="newCategoryName">Category Name <span class="required-star">*</span></label>
+            <input type="text" id="newCategoryName" placeholder="Enter category name">
+        </div>
+        <div class="form-group">
+            <label for="parentCategory">Parent Category <span class="optional">(Optional)</span></label>
+            <select id="parentCategory">
+                <option value="0">None (Top Level)</option>
+            </select>
+        </div>
+        <div class="modal-actions">
+            <button type="button" class="modal-btn cancel" onclick="closeModal('category')">Cancel</button>
+            <button type="button" class="modal-btn confirm" id="createCategoryBtn" onclick="createCategory()">Create</button>
+        </div>
+    </div>
+</div>
+
+<!-- ============================================================
+     MODAL: CREATE BRAND
+     ============================================================ -->
+<div class="modal-overlay" id="brandModal">
+    <div class="modal">
+        <h3>Create New Brand</h3>
+        <div class="form-group">
+            <label for="newBrandName">Brand Name <span class="required-star">*</span></label>
+            <input type="text" id="newBrandName" placeholder="Enter brand name">
+        </div>
+        <div class="modal-actions">
+            <button type="button" class="modal-btn cancel" onclick="closeModal('brand')">Cancel</button>
+            <button type="button" class="modal-btn confirm" id="createBrandBtn" onclick="createBrand()">Create</button>
+        </div>
+    </div>
+</div>
+
+<!-- ============================================================
+     MODAL: CREATE GLOBAL ATTRIBUTE
+     ============================================================ -->
+<div class="modal-overlay" id="attributeModal">
+    <div class="modal">
+        <h3>Create New Attribute</h3>
+        <div class="form-group">
+            <label for="newAttributeName">Attribute Name <span class="required-star">*</span></label>
+            <input type="text" id="newAttributeName" placeholder="e.g. Size, Color, Capacity">
+        </div>
+        <div class="form-group">
+            <label for="newAttributeSlug">Slug <span class="optional">(Optional)</span></label>
+            <input type="text" id="newAttributeSlug" placeholder="e.g. size, color">
+        </div>
+        <div class="modal-actions">
+            <button type="button" class="modal-btn cancel" onclick="closeModal('attribute')">Cancel</button>
+            <button type="button" class="modal-btn confirm" id="createAttributeBtn" onclick="createGlobalAttribute()">Create</button>
+        </div>
+    </div>
+</div>
+
+<!-- ============================================================
+     MODAL: CREATE ATTRIBUTE TERM / VALUE
+     ============================================================ -->
+<div class="modal-overlay" id="termModal">
+    <div class="modal">
+        <h3 id="termModalTitle">Add Attribute Value</h3>
+        <input type="hidden" id="newTermAttributeId">
+        <div class="form-group">
+            <label for="newTermName">Value Name <span class="required-star">*</span></label>
+            <input type="text" id="newTermName" placeholder="e.g. Red, XL, 100 ML">
+        </div>
+        <div class="form-group">
+            <label for="newTermSlug">Slug <span class="optional">(Optional)</span></label>
+            <input type="text" id="newTermSlug" placeholder="e.g. red, xl, 100ml">
+        </div>
+        <div class="modal-actions">
+            <button type="button" class="modal-btn cancel" onclick="closeModal('term')">Cancel</button>
+            <button type="button" class="modal-btn confirm" id="createTermBtn" onclick="createAttributeTerm()">Add Value</button>
+        </div>
+    </div>
+</div>
+
+<!-- ============================================================
+     MODAL: BULK SET PRICE
+     ============================================================ -->
+<div class="modal-overlay" id="bulkPriceModal">
+    <div class="modal">
+        <h3>Set Regular Price for All Variations</h3>
+        <div class="form-group">
+            <label for="bulkRegularPrice">Regular Price (₹) <span class="required-star">*</span></label>
+            <input type="number" id="bulkRegularPrice" placeholder="0.00" min="0" step="0.01">
+        </div>
+        <div class="form-group">
+            <label for="bulkSalePrice">Sale Price (₹) <span class="optional">(Optional)</span></label>
+            <input type="number" id="bulkSalePrice" placeholder="0.00" min="0" step="0.01">
+        </div>
+        <div class="modal-actions">
+            <button type="button" class="modal-btn cancel" onclick="closeModal('bulkPrice')">Cancel</button>
+            <button type="button" class="modal-btn confirm" onclick="applyBulkPrice()">Apply to All</button>
+        </div>
+    </div>
+</div>
+
+<!-- ===== MAIN APPLICATION SCRIPT ===== -->
+<script src="variable-product.js"></script>
+
+</body>
+</html>

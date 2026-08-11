@@ -1,0 +1,246 @@
+{
+  "name": "WooCommerce - Get Attribute Terms",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "get-attribute-terms-acordell",
+        "responseMode": "responseNode",
+        "options": {
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Access-Control-Allow-Origin",
+                "value": "*"
+              }
+            ]
+          }
+        }
+      },
+      "id": "a7000001-0001-4000-8000-000000000001",
+      "name": "Webhook - Get Attribute Terms",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [240, 300],
+      "webhookId": "attr-terms-webhook-id",
+      "notesInFlow": true,
+      "notes": "GET endpoint to retrieve all terms for a specific product attribute.\nRequires query parameter: attribute_id (integer)\nExample: ?attribute_id=1 returns all terms for attribute ID 1 (e.g., Red, Blue for Color)"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// ============================================================\n// VALIDATE INPUT — attribute_id is required\n// ============================================================\nconst items = $input.all();\nconst query = items[0]?.json?.query || items[0]?.json?.body || items[0]?.json || {};\n\nconst attributeId = parseInt(query.attribute_id);\n\nif (!attributeId || isNaN(attributeId) || attributeId <= 0) {\n  return [{\n    json: {\n      _valid: false,\n      _error: {\n        success: false,\n        message: 'attribute_id query parameter is required and must be a positive integer.'\n      }\n    }\n  }];\n}\n\nreturn [{\n  json: {\n    _valid: true,\n    attributeId: attributeId\n  }\n}];\n"
+      },
+      "id": "a7000001-0001-4000-8000-000000000002",
+      "name": "Code - Validate Input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [480, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "condition-valid",
+              "leftValue": "={{ $json._valid }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "a7000001-0001-4000-8000-000000000003",
+      "name": "IF - Valid Input",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [700, 300]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=https://acordell.com/wp-json/wc/v3/products/attributes/{{ $json.attributeId }}/terms",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "per_page",
+              "value": "100"
+            },
+            {
+              "name": "orderby",
+              "value": "name"
+            },
+            {
+              "name": "order",
+              "value": "asc"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "a7000001-0001-4000-8000-000000000004",
+      "name": "HTTP Request - Get Attribute Terms",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [940, 200],
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "pFuwiC8TcTVK4M4S",
+          "name": "Acordell Shop manager"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "notesInFlow": true,
+      "notes": "Fetches all terms for a specific product attribute.\nEndpoint: GET /wp-json/wc/v3/products/attributes/{id}/terms\nReturns terms like Red, Blue, Green for Color attribute."
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// ============================================================\n// FORMAT ATTRIBUTE TERMS RESPONSE\n// ============================================================\nconst inputItems = $input.all();\nconst attributeId = $('Code - Validate Input').first().json.attributeId;\n\ntry {\n  let rawData = inputItems[0]?.json;\n  let terms = [];\n\n  // Check for WooCommerce error response\n  if (rawData && rawData.code) {\n    return [{\n      json: {\n        success: false,\n        message: rawData.message || 'Failed to fetch attribute terms.',\n        terms: []\n      }\n    }];\n  }\n\n  if (Array.isArray(rawData)) {\n    terms = rawData;\n  } else if (inputItems.length > 1 || (rawData && rawData.id)) {\n    // n8n splits array responses into separate items\n    terms = inputItems.map(item => item.json);\n  }\n\n  // Map to clean format\n  const cleanTerms = terms\n    .filter(term => term && term.id)\n    .map(term => ({\n      id: term.id,\n      name: term.name || '',\n      slug: term.slug || '',\n      description: term.description || '',\n      count: term.count || 0\n    }));\n\n  return [{\n    json: {\n      success: true,\n      attribute_id: attributeId,\n      terms: cleanTerms\n    }\n  }];\n} catch (error) {\n  return [{\n    json: {\n      success: false,\n      message: 'Failed to fetch attribute terms: ' + error.message,\n      terms: []\n    }\n  }];\n}\n"
+      },
+      "id": "a7000001-0001-4000-8000-000000000005",
+      "name": "Code - Format Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1180, 200]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Pass through the validation error as the response\nconst items = $input.all();\nreturn [{ json: items[0].json._error }];\n"
+      },
+      "id": "a7000001-0001-4000-8000-000000000006",
+      "name": "Code - Validation Error",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [940, 420]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json) }}",
+        "options": {
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Access-Control-Allow-Origin",
+                "value": "*"
+              },
+              {
+                "name": "Access-Control-Allow-Methods",
+                "value": "GET, OPTIONS"
+              },
+              {
+                "name": "Access-Control-Allow-Headers",
+                "value": "Content-Type"
+              }
+            ]
+          }
+        }
+      },
+      "id": "a7000001-0001-4000-8000-000000000007",
+      "name": "Respond to Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1420, 300]
+    }
+  ],
+  "connections": {
+    "Webhook - Get Attribute Terms": {
+      "main": [
+        [
+          {
+            "node": "Code - Validate Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code - Validate Input": {
+      "main": [
+        [
+          {
+            "node": "IF - Valid Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF - Valid Input": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request - Get Attribute Terms",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Code - Validation Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request - Get Attribute Terms": {
+      "main": [
+        [
+          {
+            "node": "Code - Format Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code - Format Response": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code - Validation Error": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [],
+  "triggerCount": 1,
+  "updatedAt": "2024-01-01T00:00:00.000Z",
+  "versionId": "wf-get-attribute-terms-v1"
+}

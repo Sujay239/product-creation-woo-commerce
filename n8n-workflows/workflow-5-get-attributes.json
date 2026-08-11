@@ -1,0 +1,146 @@
+{
+  "name": "WooCommerce - Get Attributes",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "get-attributes-acordell",
+        "responseMode": "responseNode",
+        "options": {
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Access-Control-Allow-Origin",
+                "value": "*"
+              }
+            ]
+          }
+        }
+      },
+      "id": "a5000001-0001-4000-8000-000000000001",
+      "name": "Webhook - Get Attributes",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [240, 300],
+      "webhookId": "attr-list-webhook-id",
+      "notesInFlow": true,
+      "notes": "GET endpoint to retrieve all WooCommerce product attributes.\nReturns a list of attributes (e.g., Color, Size) with their IDs."
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "https://acordell.com/wp-json/wc/v3/products/attributes",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "per_page",
+              "value": "100"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "a5000001-0001-4000-8000-000000000002",
+      "name": "HTTP Request - WooCommerce Attributes",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [480, 300],
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "pFuwiC8TcTVK4M4S",
+          "name": "Acordell Shop manager"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "notesInFlow": true,
+      "notes": "Fetches all product attributes from WooCommerce.\nEndpoint: GET /wp-json/wc/v3/products/attributes\nReturns an array of attribute objects."
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// ============================================================\n// FORMAT ATTRIBUTES RESPONSE\n// ============================================================\n// Transforms the raw WooCommerce attributes response into a\n// clean structure for the frontend.\n\nconst inputItems = $input.all();\n\ntry {\n  let rawData = inputItems[0]?.json;\n  let attributes = [];\n\n  if (Array.isArray(rawData)) {\n    attributes = rawData;\n  } else if (inputItems.length > 1 || (rawData && rawData.id)) {\n    // n8n splits array responses into separate items\n    attributes = inputItems.map(item => item.json);\n  }\n\n  // Map to clean format\n  const cleanAttributes = attributes\n    .filter(attr => attr && attr.id)\n    .map(attr => ({\n      id: attr.id,\n      name: attr.name || '',\n      slug: attr.slug || '',\n      type: attr.type || 'select',\n      order_by: attr.order_by || 'menu_order',\n      has_archives: attr.has_archives || false\n    }));\n\n  return [{\n    json: {\n      success: true,\n      attributes: cleanAttributes\n    }\n  }];\n} catch (error) {\n  return [{\n    json: {\n      success: false,\n      message: 'Failed to fetch attributes: ' + error.message,\n      attributes: []\n    }\n  }];\n}\n"
+      },
+      "id": "a5000001-0001-4000-8000-000000000003",
+      "name": "Code - Format Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [720, 300]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json) }}",
+        "options": {
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Access-Control-Allow-Origin",
+                "value": "*"
+              },
+              {
+                "name": "Access-Control-Allow-Methods",
+                "value": "GET, OPTIONS"
+              },
+              {
+                "name": "Access-Control-Allow-Headers",
+                "value": "Content-Type"
+              }
+            ]
+          }
+        }
+      },
+      "id": "a5000001-0001-4000-8000-000000000004",
+      "name": "Respond to Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [960, 300]
+    }
+  ],
+  "connections": {
+    "Webhook - Get Attributes": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request - WooCommerce Attributes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request - WooCommerce Attributes": {
+      "main": [
+        [
+          {
+            "node": "Code - Format Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code - Format Response": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [],
+  "triggerCount": 1,
+  "updatedAt": "2024-01-01T00:00:00.000Z",
+  "versionId": "wf-get-attributes-v1"
+}

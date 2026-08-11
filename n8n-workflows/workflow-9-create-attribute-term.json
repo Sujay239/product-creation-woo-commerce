@@ -1,0 +1,246 @@
+{
+  "name": "WooCommerce - Create Attribute Term",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "create-attribute-term-acordell",
+        "responseMode": "responseNode",
+        "options": {
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Access-Control-Allow-Origin",
+                "value": "*"
+              }
+            ]
+          }
+        }
+      },
+      "id": "a9000001-0001-4000-8000-000000000001",
+      "name": "Webhook - Create Attribute Term",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [240, 300],
+      "webhookId": "attr-term-create-webhook-id",
+      "notesInFlow": true,
+      "notes": "POST endpoint to create a new value/term for a specific attribute.\nAccepts: attribute_id (required integer), name (required string), slug (optional), description (optional)"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// ============================================================\n// VALIDATE INPUT for attribute term creation\n// ============================================================\n// Required: attribute_id (integer), name (string)\n// Optional: slug (string), description (string)\n\nconst items = $input.all();\nconst body = items[0]?.json?.body || items[0]?.json || {};\n\nconst attributeId = parseInt(body.attribute_id);\nconst name = (body.name || '').trim();\nconst slug = (body.slug || '').trim();\nconst description = (body.description || '').trim();\n\nconst errors = [];\nif (!attributeId || isNaN(attributeId) || attributeId <= 0) {\n  errors.push('attribute_id is required and must be a positive integer.');\n}\nif (!name) {\n  errors.push('Term name is required.');\n}\n\nif (errors.length > 0) {\n  return [{\n    json: {\n      _valid: false,\n      _error: {\n        success: false,\n        message: errors.join(' ')\n      }\n    }\n  }];\n}\n\nreturn [{\n  json: {\n    _valid: true,\n    attributeId: attributeId,\n    name: name,\n    slug: slug || '',\n    description: description || ''\n  }\n}];\n"
+      },
+      "id": "a9000001-0001-4000-8000-000000000002",
+      "name": "Code - Validate Input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [480, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "condition-valid",
+              "leftValue": "={{ $json._valid }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "a9000001-0001-4000-8000-000000000003",
+      "name": "IF - Valid Input",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [700, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://acordell.com/wp-json/wc/v3/products/attributes/{{ $json.attributeId }}/terms",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "name",
+              "value": "={{ $json.name }}"
+            },
+            {
+              "name": "slug",
+              "value": "={{ $json.slug }}"
+            },
+            {
+              "name": "description",
+              "value": "={{ $json.description }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "a9000001-0001-4000-8000-000000000004",
+      "name": "HTTP Request - Create Attribute Term",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [940, 200],
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "pFuwiC8TcTVK4M4S",
+          "name": "Acordell Shop manager"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "notesInFlow": true,
+      "notes": "Creates a new term (value) for an attribute in WooCommerce.\nEndpoint: POST /wp-json/wc/v3/products/attributes/{attribute_id}/terms\nHandles 'term_exists' error if already created."
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// ============================================================\n// FORMAT ATTRIBUTE TERM CREATION RESPONSE\n// ============================================================\n// Handle success, duplicate (term already exists), and errors.\n\nconst items = $input.all();\nconst data = items[0]?.json || {};\n\n// Successful creation\nif (data.id && data.name) {\n  return [{\n    json: {\n      success: true,\n      term: {\n        id: data.id,\n        name: data.name,\n        slug: data.slug || '',\n        description: data.description || '',\n        count: data.count || 0\n      }\n    }\n  }];\n}\n\n// WooCommerce error: term already exists\nif (data.code === 'term_exists') {\n  return [{\n    json: {\n      success: false,\n      message: 'A term with this name already exists for this attribute.',\n      existing_id: data.data?.resource_id || null\n    }\n  }];\n}\n\n// Other error\nreturn [{\n  json: {\n    success: false,\n    message: data.message || 'Failed to create attribute term.'\n  }\n}];\n"
+      },
+      "id": "a9000001-0001-4000-8000-000000000005",
+      "name": "Code - Format Success",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1180, 200]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Pass through the validation error as the response\nconst items = $input.all();\nreturn [{ json: items[0].json._error }];\n"
+      },
+      "id": "a9000001-0001-4000-8000-000000000006",
+      "name": "Code - Validation Error",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [940, 420]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json) }}",
+        "options": {
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Access-Control-Allow-Origin",
+                "value": "*"
+              },
+              {
+                "name": "Access-Control-Allow-Methods",
+                "value": "POST, OPTIONS"
+              },
+              {
+                "name": "Access-Control-Allow-Headers",
+                "value": "Content-Type"
+              }
+            ]
+          }
+        }
+      },
+      "id": "a9000001-0001-4000-8000-000000000007",
+      "name": "Respond to Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1420, 300]
+    }
+  ],
+  "connections": {
+    "Webhook - Create Attribute Term": {
+      "main": [
+        [
+          {
+            "node": "Code - Validate Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code - Validate Input": {
+      "main": [
+        [
+          {
+            "node": "IF - Valid Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF - Valid Input": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request - Create Attribute Term",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Code - Validation Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request - Create Attribute Term": {
+      "main": [
+        [
+          {
+            "node": "Code - Format Success",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code - Format Success": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code - Validation Error": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [],
+  "triggerCount": 1,
+  "updatedAt": "2024-01-01T00:00:00.000Z",
+  "versionId": "wf-create-attribute-term-v1"
+}
