@@ -1,0 +1,4 @@
+pyftpdlib>=2.0.0
+qrcode>=7.4.2
+pillow>=10.0.0
+pyperclip>=1.8.2
